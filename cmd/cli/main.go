@@ -19,7 +19,7 @@ import (
 	"github.com/xiaoxl/sql-cli/pkg/result"
 
 	_ "github.com/xiaoxl/sql-cli/pkg/db/postgres"
-		_ "github.com/xiaoxl/sql-cli/pkg/db/sqlite"
+	_ "github.com/xiaoxl/sql-cli/pkg/db/sqlite"
 )
 
 var (
@@ -49,13 +49,48 @@ func init() {
 	flag.StringVar(&driverFlag, "driver", "", "database driver (auto-detected from DSN if not set)")
 }
 
-const appVersion = "0.1.0"
+const appVersion = "0.2.0"
+
+// qcEnv holds values loaded from a .qcenv config file.
+type qcEnv struct {
+	dsn    string
+	driver string
+}
+
+// loadQCEnv reads .qcenv from the current working directory.
+// Format: KEY=VALUE, one per line. Lines starting with # are comments.
+func loadQCEnv() qcEnv {
+	var env qcEnv
+	data, err := os.ReadFile(".qcenv")
+	if err != nil {
+		return env
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(key)
+		val = strings.TrimSpace(val)
+		switch key {
+		case "QC_DSN":
+			env.dsn = val
+		case "QC_DRIVER":
+			env.driver = val
+		}
+	}
+	return env
+}
 
 func main() {
 	flag.Parse()
 
 	if version {
-		fmt.Fprintf(os.Stderr, "sql-cli version %s\n", appVersion)
+		fmt.Fprintf(os.Stderr, "qc version %s\n", appVersion)
 		os.Exit(0)
 	}
 
@@ -65,13 +100,18 @@ func main() {
 		os.Exit(1)
 	}
 
+	qcFile := loadQCEnv()
+
 	cmd := args[0]
 	dsnStr := args[1]
 	if dsnStr == "" {
-		dsnStr = os.Getenv("SQL_CLI_DSN")
+		dsnStr = os.Getenv("QC_DSN")
 	}
 	if dsnStr == "" {
-		fmt.Fprintf(os.Stderr, "DSN is required as argument or via SQL_CLI_DSN env var\n")
+		dsnStr = qcFile.dsn
+	}
+	if dsnStr == "" {
+		fmt.Fprintf(os.Stderr, "DSN is required as argument, via QC_DSN env var, or .qcenv file\n")
 		os.Exit(1)
 	}
 	sql := ""
@@ -80,6 +120,9 @@ func main() {
 	}
 
 	driver := driverFlag
+	if driver == "" {
+		driver = qcFile.driver
+	}
 	if driver == "" {
 		var detErr error
 		driver, detErr = dsn.Detect(dsnStr)
@@ -100,7 +143,6 @@ func main() {
 	defer sess.Close()
 
 	ctx := context.Background()
-
 	confirmed := force || forceDeprecated
 
 	switch cmd {
@@ -196,33 +238,30 @@ func execWithConfirmation(ctx context.Context, sess *db.Session, sql string) (*r
 }
 
 func usage() {
-	fmt.Fprintf(os.Stderr, `sql-cli -- MySQL client for AI Agents
+	fmt.Fprintf(os.Stderr, `qc — multi-database CLI for AI Agents (MySQL, PostgreSQL, SQLite)
 
 Usage:
-  sql-cli ping   <dsn>
-  sql-cli exec   <dsn> [<sql>]   [--file <path>] [--transaction] [--continue-on-error] [--timeout D]
-  sql-cli query  <dsn> [<sql>]   [--limit N] [--offset N] [--timeout D]
-  sql-cli stream <dsn> <sql>     [--limit N] [--timeout D]
-
-Commands:
-  exec --file <path>    Read and execute SQL statements from a file (batch mode)
-  exec --transaction    Wrap all batch statements in a single transaction
-  exec --continue-on-error  Continue batch execution after statement failures
+  qc ping   [dsn]
+  qc exec   [dsn] [<sql>]   [--file <path>] [--transaction] [--continue-on-error]
+  qc query  [dsn] [<sql>]   [--limit N] [--offset N] [--timeout D]
+  qc stream [dsn] <sql>     [--limit N] [--timeout D]
 
 Flags:
-  --limit int           query row limit (0=default)
+  --driver <name>       database driver (mysql/postgres/sqlite, auto-detected)
+  --limit int           query row limit (0=default 100)
   --offset int          query row offset
-  --timeout d           query timeout (0=default, e.g. 30s)
-  --file, -f <path>     SQL file to execute (batch mode, exec only)
-  --transaction         wrap batch statements in a transaction (exec --file only)
-  --continue-on-error   continue batch after statement failures (exec --file only)
-  --driver <name>       database driver (auto-detected from DSN if not set)
-  --force               skip confirmation prompts for dangerous operations
-  --yes                 alias for --force
+  --timeout d           query timeout (0=default 30s)
+  --file, -f <path>     SQL file to execute (exec only)
+  --transaction         wrap batch in a single transaction
+  --continue-on-error   continue after statement failures
+  --force               skip dangerous operation confirmation
   --version             print version and exit
 
-Environment:
-  SQL_CLI_DSN           default DSN if not provided as argument
+Config file (.qcenv):
+  echo 'QC_DSN=user:pass@tcp(host:3306)/db' > .qcenv
+  echo 'QC_DRIVER=mysql'                      >> .qcenv
+
+Priority: CLI arguments > environment variables > .qcenv file
 `)
 }
 
