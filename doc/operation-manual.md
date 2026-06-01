@@ -1,8 +1,8 @@
 # qc Operation Manual
 
-`qc` is a MySQL CLI tool for safe, structured database operations. All output is JSON. Built-in safety guards prevent accidental data loss. Designed for AI Agents and developers.
+`qc` is a multi-database CLI tool supporting MySQL, PostgreSQL, and SQLite. All output is JSON. Built-in safety guards prevent accidental data loss. Designed for AI Agents and developers.
 
-Version: 0.1.0
+Version: 0.2.0
 
 ---
 
@@ -20,33 +20,41 @@ make test       # Run tests
 make lint       # Code check
 ```
 
-Place the `qc` binary in your `PATH` after building.
+Place `qc` in your `PATH` after building.
 
 ---
 
 ## Quick Start
 
 ```bash
-# Test connection
-qc ping "test:test@123@tcp(115.29.209.119:3306)/test"
+# MySQL
+qc ping "test:test@123@tcp(127.0.0.1:3306)/mydb"
+qc exec "test:test@123@tcp(127.0.0.1:3306)/mydb" "CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100))"
+qc query "test:test@123@tcp(127.0.0.1:3306)/mydb" "SELECT * FROM users"
 
-# Create table
-qc exec "test:test@123@tcp(115.29.209.119:3306)/test" \
-  "CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100), age INT)"
+# PostgreSQL (DSN auto-detected)
+qc ping "postgres://user:pass@127.0.0.1:5432/mydb"
+qc query "postgres://user:pass@127.0.0.1:5432/mydb" "SELECT * FROM users"
 
-# Insert data
-qc exec "test:test@123@tcp(115.29.209.119:3306)/test" \
-  "INSERT INTO users (name, age) VALUES ('Alice', 25), ('Bob', 30)"
+# SQLite
+qc query "/data/mydb.sqlite" "SELECT * FROM users"
+qc query ":memory:" "SELECT 1"
+```
 
-# Query with auto LIMIT
-qc query "test:test@123@tcp(115.29.209.119:3306)/test" "SELECT * FROM users"
+---
 
-# Paginated query
-qc query "test:test@123@tcp(115.29.209.119:3306)/test" \
-  --limit 10 --offset 20 "SELECT * FROM users"
+## Supported Databases
 
-# Stream large datasets
-qc stream "test:test@123@tcp(115.29.209.119:3306)/test" "SELECT * FROM large_table"
+| Database | DSN Format | Driver |
+|----------|------------|--------|
+| MySQL | `user:pass@tcp(host:port)/db` | `mysql` |
+| PostgreSQL | `postgres://user:pass@host:port/db` | `postgres` / `pgx` |
+| SQLite | `/path/to/file.db` or `:memory:` | `sqlite` / `sqlite3` |
+
+DSN is auto-detected. Use `--driver` to override:
+
+```bash
+qc --driver postgres "postgres://..." query "SELECT 1"
 ```
 
 ---
@@ -55,9 +63,9 @@ qc stream "test:test@123@tcp(115.29.209.119:3306)/test" "SELECT * FROM large_tab
 
 ### Conventions
 
-- DSN format: `user:pass@tcp(host:port)/dbname`
 - All output is JSON
-- Set `QC_DSN` environment variable to omit the DSN argument
+- DSN is optional if `QC_DSN` is set
+- Use `--driver` to specify database type explicitly
 
 ### ping — Health Check
 
@@ -65,35 +73,27 @@ qc stream "test:test@123@tcp(115.29.209.119:3306)/test" "SELECT * FROM large_tab
 qc ping <dsn>
 ```
 
-| Argument | Required | Description |
-|----------|----------|-------------|
-| dsn | no* | Connection string (optional if `QC_DSN` is set) |
+Success: `{"status":"ok"}`
 
-Success output:
-
-```json
-{"status":"ok"}
-```
-
-### exec — Execute Write Operations
+### exec — Write Operations
 
 ```
 qc exec <dsn> <sql>
+qc exec <dsn> -f <file.sql>                 # Read SQL from file
+qc exec <dsn> -f <file.sql> --transaction   # All in one transaction
+qc exec <dsn> -f <file.sql> --continue-on-error  # Continue on error
 ```
 
-| Argument | Required | Description |
-|----------|----------|-------------|
+| Arg / Flag | Required | Description |
+|------------|----------|-------------|
 | dsn | no* | Connection string |
-| sql | yes | SQL statement to execute |
+| sql | no** | SQL statement (or use -f) |
+| `-f, --file` | no | Read and execute .sql file |
+| `--transaction` | no | Wrap all statements in a transaction |
+| `--continue-on-error` | no | Continue after individual failures |
+| `--force` | no | Skip dangerous op confirmation |
 
-Supported SQL:
-
-- `CREATE TABLE` / `ALTER TABLE`
-- `INSERT`
-- `UPDATE` (WHERE clause required)
-- `DELETE` (WHERE clause required)
-
-**Note**: `DROP TABLE` and `TRUNCATE TABLE` prompt for confirmation by default (use `--force` to skip). `UPDATE`/`DELETE` without WHERE are rejected entirely.
+Supported SQL: CREATE TABLE, ALTER TABLE, INSERT, UPDATE, DELETE. DROP/TRUNCATE require confirmation (or `--force`).
 
 Success output:
 
@@ -107,27 +107,20 @@ Success output:
 qc query <dsn> <sql> [flags]
 ```
 
-| Arg / Flag | Required | Default | Description |
-|------------|----------|---------|-------------|
-| dsn | no* | — | Connection string |
-| sql | yes | — | SELECT statement |
-| `--limit N` | no | 100 | Max rows to return |
-| `--offset N` | no | 0 | Rows to skip |
-| `--timeout D` | no | 30s | Query timeout (e.g., `10s`, `1m`) |
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--limit N` | 100 | Max rows to return |
+| `--offset N` | 0 | Rows to skip |
+| `--timeout D` | 30s | Query timeout |
 
-**Key behaviors**:
+Auto-appends `LIMIT 100` if missing, capped at 1000. `has_more` is true when result count equals limit.
 
-- If SQL has no `LIMIT`, `LIMIT 100` is auto-appended
-- `--limit` is capped at the global max (1000)
-- When returned rows equal the limit, `has_more` is `true`
-- Non-SELECT statements are rejected
-
-Success output:
+Output:
 
 ```json
 {
-  "columns": ["id", "name", "age"],
-  "rows": [[1, "Alice", 25], [2, "Bob", 30]],
+  "columns": ["id", "name"],
+  "rows": [[1, "Alice"], [2, "Bob"]],
   "row_count": 2,
   "duration_ms": 45,
   "warning": "LIMIT 100 applied automatically",
@@ -138,176 +131,82 @@ Success output:
 ### stream — Streaming Queries
 
 ```
-qc stream <dsn> <sql> [flags]
+qc stream <dsn> <sql> [--limit N] [--timeout D]
 ```
 
-| Arg / Flag | Required | Default | Description |
-|------------|----------|---------|-------------|
-| dsn | no* | — | Connection string |
-| sql | yes | — | SELECT statement |
-| `--limit N` | no | 100 | Max rows to return |
-| `--timeout D` | no | 30s | Query timeout |
-
-Unlike `query`, `stream` outputs one JSON object per line, ideal for large datasets.
-
-Output (one line per row):
+Outputs one JSON object per line:
 
 ```json
 {"row": {"id": 1, "name": "Alice"}, "index": 0}
-{"row": {"id": 2, "name": "Bob"}, "index": 1}
 ```
-
-### Global Flags
-
-| Flag | Description |
-|------|-------------|
-| `--version` | Print version |
-| `--force` | Skip confirmation prompts for dangerous operations |
 
 ### Environment Variables
 
 | Variable | Description |
 |----------|-------------|
-| `QC_DSN` | Default DSN, makes the dsn argument optional |
+| `QC_DSN` | Default DSN for all commands |
+
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--driver <name>` | Specify database driver |
+| `--force` | Skip dangerous operation prompt |
+| `--version` | Print version |
 
 ---
 
 ## Safety Features
 
-`qc` has built-in safety guards to prevent accidental data loss.
-
 ### LIMIT Enforcement
 
-All queries have automatic row limits to prevent full table scans.
+All queries have automatic row limits (default 100, max 1000). `has_more` indicates truncation.
 
-| Setting | Default | Description |
-|---------|---------|-------------|
-| Default LIMIT | 100 | Auto-appended when SQL has no LIMIT |
-| Max LIMIT | 1000 | Hard cap for any query |
+### Dangerous Operation Confirmation
 
-The `warning` and `has_more` fields in output indicate data truncation.
+DROP/TRUNCATE prompt for confirmation. UPDATE/DELETE without WHERE are rejected outright. Use `--force` to skip prompts.
 
-### Dangerous Operation Guard
+### Command Isolation
 
-The following operations prompt for confirmation by default:
-
-| Operation | Default |
-|-----------|---------|
-| `DROP TABLE` | Prompt |
-| `TRUNCATE TABLE` | Prompt |
-| `UPDATE` without `WHERE` | Blocked |
-| `DELETE` without `WHERE` | Blocked |
-
-Use `--force` to skip prompts (e.g., `qc --force exec ...`). The policy is configurable programmatically via `WithDangerousOpPolicy`.
-
-### Streaming vs Pagination
-
-Both `query` (with `--limit`/`--offset`) and `stream` are available, each serving different use cases.
-
-| Aspect | Streaming (stream) | Pagination (query --limit/--offset) |
-|--------|-------------------|--------------------------------------|
-| Round trips | 1 query, row-by-row | N queries, one per page |
-| Consistency | Snapshot from single cursor | Can miss rows if data changes between pages |
-| First-row latency | Immediate | Must wait for full first page |
-| Programming model | Simple loop | State management (offset tracking) |
-| Early termination | Yes (call Close) | Must let full pages complete |
-| Random access | No | Yes (jump to page N) |
-| Restartable | No (stateful cursor) | Yes (resume from offset) |
-
-**When to use streaming**: Large exports, bulk processing, real-time analysis, agent-driven row-by-row processing, single-pass workflows where you want minimum memory and latency.
-
-**When to use pagination**: UI display, stateless/parallel operations, random page access, restartable batch jobs.
-
-Both are kept because they complement each other — streaming is more efficient for single-pass work, while pagination is better for interactive or restartable access patterns.
-
-### Non-Query Isolation
-
-The `query` and `stream` commands only accept SELECT. Any write operation is rejected, preventing accidental use of the wrong command.
+query and stream accept only SELECT — write operations are rejected.
 
 ### Query Timeout
 
-Every query has a timeout (default 30 seconds). Timed-out queries are cancelled automatically.
-
----
-
-## Output Format
-
-### Write Result (exec)
-
-```json
-{
-  "last_insert_id": 42,
-  "rows_affected": 1,
-  "duration_ms": 15
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `last_insert_id` | int | Auto-increment ID (omitted when 0) |
-| `rows_affected` | int | Number of affected rows |
-| `duration_ms` | int | Execution time in milliseconds |
-| `error` | string | Present only on error |
-
-### Query Result (query)
-
-```json
-{
-  "columns": ["id", "name", "email"],
-  "rows": [[1, "Alice", "alice@example.com"], [2, "Bob", "bob@example.com"]],
-  "row_count": 2,
-  "duration_ms": 45,
-  "warning": "LIMIT 100 applied automatically",
-  "has_more": false
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `columns` | []string | Column names in query order |
-| `rows` | [][]any | Data rows, each row follows columns order |
-| `row_count` | int | Number of rows returned |
-| `duration_ms` | int | Query execution time in ms |
-| `warning` | string | Present when LIMIT is auto-applied or capped |
-| `has_more` | bool | `true` if data may be truncated |
-| `error` | string | Present only on error |
-
-### Stream Row (stream)
-
-```json
-{"row": {"id": 1, "name": "Alice"}, "index": 0}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `row` | object | Column-to-value mapping |
-| `index` | int | Row index (0-based) |
+Default 30 seconds. Timed-out queries are cancelled automatically.
 
 ---
 
 ## Go Library Usage
 
-Import `qc` as a Go library for programmatic access.
-
-### Import
-
-```bash
-go get github.com/xiaoxl/sql-cli
-```
-
-### Basic Usage
-
 ```go
-sess, _ := db.Open("mysql", "user:pass@tcp(127.0.0.1:3306)/mydb",
+import (
+    _ "github.com/xiaoxl/sql-cli/pkg/db/mysql"
+    _ "github.com/xiaoxl/sql-cli/pkg/db/postgres"
+    _ "github.com/xiaoxl/sql-cli/pkg/db/sqlite"
+
+    "github.com/xiaoxl/sql-cli/pkg/db"
+    "github.com/xiaoxl/sql-cli/pkg/config"
+    "github.com/xiaoxl/sql-cli/pkg/registry"
+)
+
+// MySQL
+sess, _ := db.Open("mysql", "user:pass@tcp(127.0.0.1:3306)/db",
     config.WithDefaultLimit(50),
     config.WithQueryTimeout(10 * time.Second),
 )
-defer sess.Close()
 
+// PostgreSQL
+sess, _ := db.Open("postgres", "postgres://user:pass@127.0.0.1:5432/db")
+
+// SQLite
+sess, _ := db.Open("sqlite", "/data/mydb.sqlite")
+
+defer sess.Close()
 ctx := context.Background()
 
 // Write
 res, _ := sess.Exec(ctx, "INSERT INTO users (name) VALUES (?)", "Alice")
+
 // Query
 q, _ := sess.Query(ctx, "SELECT * FROM users")
 // Paginate
@@ -319,56 +218,26 @@ for sr.Next() { row := sr.Scan() }
 tx, _ := sess.Begin(ctx)
 tx.Exec(ctx, "INSERT INTO users (name) VALUES (?)", "Bob")
 tx.Commit(ctx)
-```
 
-### Config Options
-
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `WithDefaultLimit` | int | 100 | Auto LIMIT value |
-| `WithMaxLimit` | int | 1000 | LIMIT hard cap |
-| `WithMaxRows` | int | 1000 | Max returned rows |
-| `WithQueryTimeout` | duration | 30s | Query timeout |
-| `WithMaxOpenConns` | int | 25 | Connection pool size |
-| `WithMaxIdleConns` | int | 5 | Max idle connections |
-| `WithConnMaxLifetime` | duration | 5m | Connection reuse time |
-| `WithStreamBatchSize` | int | 50 | Stream buffer size |
-| `WithDangerousOpPolicy` | Policy | Prompt | Block/Prompt/Warn/Allow |
-| `WithRejectNoWhere` | bool | true | Reject UPDATE/DELETE without WHERE |
-| `WithLogSanitizeParams` | bool | false | Sanitize logged params |
-| `WithMaxConcurrentQueries` | int | 0 | Concurrency cap (0=unlimited) |
-
-### Multi-Session
-
-```go
+// Multi-session
 reg := registry.NewRegistry()
-reg.Open("prod", "mysql", "user:pass@tcp(prod-db:3306)/db")
-reg.Open("dev", "mysql", "user:pass@tcp(dev-db:3306)/db")
+reg.Open("prod", "mysql", "user:pass@tcp(prod:3306)/db")
+reg.Open("dev", "mysql", "user:pass@tcp(dev:3306)/db")
 prod, _ := reg.Get("prod")
 reg.CloseAll()
 ```
 
----
+### Config Options
 
-## Testing
-
-```bash
-make test            # Unit tests
-make coverage        # Coverage report
-go test -race ./...  # Race detection
-```
-
-Integration testing with Docker MySQL:
-
-```bash
-docker run -d --name qc-mysql \
-  -e MYSQL_ROOT_PASSWORD=testpass \
-  -e MYSQL_DATABASE=testdb \
-  -p 3307:3306 mysql:8
-
-QC_DSN="root:testpass@tcp(127.0.0.1:3307)/testdb" go test ./...
-docker stop qc-mysql && docker rm qc-mysql
-```
+| Option | Default | Description |
+|--------|---------|-------------|
+| `WithDefaultLimit(n)` | 100 | Auto LIMIT |
+| `WithMaxLimit(n)` | 1000 | LIMIT hard cap |
+| `WithQueryTimeout(d)` | 30s | Query timeout |
+| `WithMaxOpenConns(n)` | 25 | Max connections |
+| `WithMaxIdleConns(n)` | 5 | Max idle connections |
+| `WithDangerousOpPolicy(p)` | PolicyPrompt | Block/Warn/Allow/Prompt |
+| `WithRejectNoWhere(b)` | true | Reject UPDATE/DELETE without WHERE |
 
 ---
 
@@ -376,8 +245,10 @@ docker stop qc-mysql && docker rm qc-mysql
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `dangerous operation requires confirmation` | Tried DROP/TRUNCATE without confirmation | Use `--force` to skip prompts or adjust policy |
+| `dangerous operation requires confirmation` | DROP/TRUNCATE blocked | Type `yes` or use `--force` |
 | `UPDATE/DELETE without WHERE clause` | Missing WHERE | Add WHERE clause |
-| `only SELECT queries are allowed` | Used query/stream for write | Use exec instead |
-| `LIMIT capped to N` | Limit exceeds max | Reduce limit or use pagination |
-| `transaction is already committed or rolled back` | Double commit/rollback | Check transaction logic |
+| `only SELECT queries are allowed` | Wrong command | Use exec instead |
+| `LIMIT capped to N` | Limit exceeds max | Reduce or paginate |
+| `transaction already committed or rolled back` | Double commit/rollback | Check tx logic |
+| `unknown database driver` | Driver not registered | Check import |
+| `unrecognized DSN format` | DSN not parseable | Use `--driver` explicitly |
