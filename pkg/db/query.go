@@ -91,6 +91,7 @@ func (s *Session) queryWithLimit(ctx context.Context, sqlStr string, limit int, 
 		}
 	}
 
+	sqlStr = s.Rebind(sqlStr)
 	start := time.Now()
 	rows, err := s.db.QueryxContext(ctx, sqlStr, args...)
 	if err != nil {
@@ -197,6 +198,7 @@ func (s *Session) queryWithOffset(ctx context.Context, sqlStr string, limit, off
 		}
 	}
 
+	sqlStr = s.Rebind(sqlStr)
 	start := time.Now()
 	rows, err := s.db.QueryxContext(ctx, sqlStr, args...)
 	if err != nil {
@@ -353,6 +355,7 @@ func (s *Session) QueryWithOptions(ctx context.Context, sqlStr string, opts Quer
 		sqlStr = sqlnorm.AppendOFFSET(sqlStr, opts.Offset)
 	}
 
+	sqlStr = s.Rebind(sqlStr)
 	start := time.Now()
 	rows, err := s.db.QueryxContext(ctx, sqlStr, args...)
 	if err != nil {

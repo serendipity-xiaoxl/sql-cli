@@ -141,6 +141,12 @@ func (s *Session) releaseConcurrencySlot() {
 	s.mu.Unlock()
 }
 
+// Rebind converts ? placeholders to the backend-native format (e.g. $N for PostgreSQL).
+// This is a no-op for MySQL but required for PostgreSQL compatibility.
+func (s *Session) Rebind(sql string) string {
+	return s.db.Rebind(sql)
+}
+
 // Name returns the session's identifier.
 func (s *Session) Name() string {
 	return s.name

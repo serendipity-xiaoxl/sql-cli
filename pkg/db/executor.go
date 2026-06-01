@@ -40,6 +40,8 @@ func (s *Session) Exec(ctx context.Context, sqlStr string, args ...interface{}) 
 		return nil, fmt.Errorf("exec %s: %w", op, ErrUnconditionalModify)
 	}
 
+	sqlStr = s.Rebind(sqlStr)
+
 	start := time.Now()
 	res, err := s.db.ExecContext(ctx, sqlStr, args...)
 	duration := time.Since(start)

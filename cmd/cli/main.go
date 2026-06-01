@@ -17,6 +17,8 @@ import (
 	"github.com/xiaoxl/sql-cli/pkg/dsn"
 	"github.com/xiaoxl/sql-cli/pkg/guard"
 	"github.com/xiaoxl/sql-cli/pkg/result"
+
+	_ "github.com/xiaoxl/sql-cli/pkg/db/postgres"
 )
 
 var (

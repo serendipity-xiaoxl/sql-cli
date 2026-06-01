@@ -179,6 +179,8 @@ func (t *transaction) Exec(ctx context.Context, sqlStr string, args ...interface
 		return nil, fmt.Errorf("exec %s: %w", op, ErrUnconditionalModify)
 	}
 
+	sqlStr = t.tx.Rebind(sqlStr)
+	sqlStr = t.tx.Rebind(sqlStr)
 	start := time.Now()
 	res, err := t.tx.ExecContext(ctx, sqlStr, args...)
 	duration := time.Since(start)
@@ -237,6 +239,7 @@ func (t *transaction) Query(ctx context.Context, sqlStr string, args ...interfac
 		}
 	}
 
+	sqlStr = t.tx.Rebind(sqlStr)
 	start := time.Now()
 	rows, err := t.tx.QueryxContext(ctx, sqlStr, args...)
 	if err != nil {
@@ -327,6 +330,7 @@ func (t *transaction) QueryWithOffset(ctx context.Context, sqlStr string, limit,
 		}
 	}
 
+	sqlStr = t.tx.Rebind(sqlStr)
 	start := time.Now()
 	rows, err := t.tx.QueryxContext(ctx, sqlStr, args...)
 	if err != nil {

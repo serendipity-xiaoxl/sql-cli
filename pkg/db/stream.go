@@ -87,6 +87,7 @@ func (s *Session) QueryStream(ctx context.Context, sqlStr string, args ...interf
 		default:
 		}
 
+		sqlStr = s.db.Rebind(sqlStr)
 		rows, err := s.db.QueryxContext(queryCtx, sqlStr, args...)
 		if err != nil {
 			sr.SetError(fmt.Errorf("query %s: %w", op, err))
