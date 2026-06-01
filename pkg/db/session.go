@@ -11,9 +11,16 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/xiaoxl/sql-cli/pkg/config"
 
-	// Register MySQL driver
 	_ "github.com/go-sql-driver/mysql"
 )
+
+func init() {
+	RegisterDriver("mysql", defaultMySQLFactory)
+}
+
+func defaultMySQLFactory(dsn string, cfg *config.Config) (*Session, error) {
+	return newSession("mysql", dsn, cfg)
+}
 
 // Session represents a single database session with a connection pool.
 // It implements the Database interface for MySQL.
@@ -45,6 +52,23 @@ func newSessionWithDB(name, dsn string, cfg *config.Config, db *sqlx.DB) *Sessio
 // NewTestSession creates a Session with an existing sqlx.DB (for external tests).
 func NewTestSession(name, dsn string, cfg *config.Config, db *sqlx.DB) *Session {
 	return newSessionWithDB(name, dsn, cfg, db)
+}
+
+// NewSessionFromDB creates a Session from an existing sqlx.DB connection.
+// Used by driver factories (e.g., pkg/db/mysql) to construct a Session with
+// full pool configuration.
+func NewSessionFromDB(dsn string, cfg *config.Config, sqlxDB *sqlx.DB) *Session {
+	s := &Session{
+		name:   dsn,
+		dsn:    dsn,
+		cfg:    cfg,
+		db:     sqlxDB,
+		logger: slog.Default().With("component", "session"),
+	}
+	if cfg.Name != "" {
+		s.name = cfg.Name
+	}
+	return s
 }
 
 // newSession creates a new Session with the given configuration.

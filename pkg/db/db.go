@@ -1,11 +1,10 @@
 // Package db defines the Database and Tx interfaces for database operations.
-// Implementations (e.g., MySQL) live in internal/ and pkg/db/mysql/.
+// Implementations (e.g., MySQL) live in pkg/db/mysql/.
 package db
 
 import (
 	"context"
 
-	"github.com/xiaoxl/sql-cli/pkg/config"
 	"github.com/xiaoxl/sql-cli/pkg/result"
 )
 
@@ -55,13 +54,4 @@ type Tx interface {
 
 	// QueryWithOffset executes a SELECT with pagination within the transaction.
 	QueryWithOffset(ctx context.Context, sql string, limit, offset int, args ...interface{}) (*result.QueryResult, error)
-}
-
-// Open creates a new Session with the given driver, DSN, and options.
-func Open(driver, dsn string, options ...config.Option) (*Session, error) {
-	cfg := config.DefaultConfig()
-	for _, opt := range options {
-		opt(cfg)
-	}
-	return newSession(driver, dsn, cfg)
 }

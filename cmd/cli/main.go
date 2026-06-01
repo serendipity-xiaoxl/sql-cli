@@ -14,6 +14,7 @@ import (
 	"github.com/xiaoxl/sql-cli/internal/sqlnorm"
 	"github.com/xiaoxl/sql-cli/pkg/config"
 	"github.com/xiaoxl/sql-cli/pkg/db"
+	"github.com/xiaoxl/sql-cli/pkg/dsn"
 	"github.com/xiaoxl/sql-cli/pkg/guard"
 	"github.com/xiaoxl/sql-cli/pkg/result"
 )
@@ -28,6 +29,7 @@ var (
 	continueOnError bool
 	force           bool
 	forceDeprecated bool
+	driverFlag      string
 )
 
 func init() {
@@ -41,6 +43,7 @@ func init() {
 	flag.BoolVar(&continueOnError, "continue-on-error", false, "continue batch after statement failures")
 	flag.BoolVar(&force, "force", false, "skip confirmation prompts for dangerous operations")
 	flag.BoolVar(&forceDeprecated, "yes", false, "alias for --force")
+	flag.StringVar(&driverFlag, "driver", "", "database driver (auto-detected from DSN if not set)")
 }
 
 const appVersion = "0.1.0"
@@ -60,11 +63,11 @@ func main() {
 	}
 
 	cmd := args[0]
-	dsn := args[1]
-	if dsn == "" {
-		dsn = os.Getenv("SQL_CLI_DSN")
+	dsnStr := args[1]
+	if dsnStr == "" {
+		dsnStr = os.Getenv("SQL_CLI_DSN")
 	}
-	if dsn == "" {
+	if dsnStr == "" {
 		fmt.Fprintf(os.Stderr, "DSN is required as argument or via SQL_CLI_DSN env var\n")
 		os.Exit(1)
 	}
@@ -73,12 +76,21 @@ func main() {
 		sql = args[2]
 	}
 
+	driver := driverFlag
+	if driver == "" {
+		var detErr error
+		driver, detErr = dsn.Detect(dsnStr)
+		if detErr != nil {
+			fatal("detect driver: %v", detErr)
+		}
+	}
+
 	opts := []config.Option{}
 	if timeout > 0 {
 		opts = append(opts, config.WithQueryTimeout(timeout))
 	}
 
-	sess, err := db.Open("mysql", dsn, opts...)
+	sess, err := db.Open(driver, dsnStr, opts...)
 	if err != nil {
 		fatal("open session: %v", err)
 	}
@@ -201,6 +213,7 @@ Flags:
   --file, -f <path>     SQL file to execute (batch mode, exec only)
   --transaction         wrap batch statements in a transaction (exec --file only)
   --continue-on-error   continue batch after statement failures (exec --file only)
+  --driver <name>       database driver (auto-detected from DSN if not set)
   --force               skip confirmation prompts for dangerous operations
   --yes                 alias for --force
   --version             print version and exit
