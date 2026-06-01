@@ -2,3 +2,5 @@
 *.out
 *.test
 vendor/
+/cli
+/sql-cli

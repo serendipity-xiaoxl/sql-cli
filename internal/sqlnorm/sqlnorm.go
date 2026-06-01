@@ -34,6 +34,24 @@ func HasLIMIT(sql string) bool {
 	return matchKeyword(cleaned, "LIMIT")
 }
 
+// HasOFFSET checks if a SQL statement already contains an OFFSET clause.
+func HasOFFSET(sql string) bool {
+	cleaned := stripQuoted(sql)
+	return matchKeyword(cleaned, "OFFSET")
+}
+
+// AppendOFFSET appends an OFFSET clause to a SQL statement, before any trailing
+// semicolon. Should be called after AppendLIMIT so the result is
+// "... LIMIT n OFFSET m".
+func AppendOFFSET(sql string, offset int) string {
+	s := strings.TrimSpace(sql)
+	hasSemi := strings.HasSuffix(s, ";")
+	if hasSemi {
+		s = s[:len(s)-1]
+	}
+	return s + " OFFSET " + itoa(offset) + suffix(hasSemi)
+}
+
 // AppendLIMIT appends a LIMIT clause to a SQL statement, before any trailing
 // semicolon. Returns the original SQL if it already has a LIMIT clause.
 func AppendLIMIT(sql string, limit int) string {

@@ -279,3 +279,93 @@ func (t *transaction) Query(ctx context.Context, sqlStr string, args ...interfac
 	res.HasMore = hasMore
 	return res, nil
 }
+
+// QueryWithOffset executes a SELECT with pagination within the transaction.
+func (t *transaction) QueryWithOffset(ctx context.Context, sqlStr string, limit, offset int, args ...interface{}) (*result.QueryResult, error) {
+	if err := t.checkActive(); err != nil {
+		return nil, fmt.Errorf("query %s: %w", sqlnorm.Operation(sqlStr), err)
+	}
+
+	op := sqlnorm.Operation(sqlStr)
+
+	// Reject non-SELECT
+	if !sqlnorm.IsSELECT(op) {
+		return nil, fmt.Errorf("query %s: %w", op, ErrNonSelectQuery)
+	}
+
+	// Enforce LIMIT
+	hasExistingLimit := sqlnorm.HasLIMIT(sqlStr)
+	appliedLimit := 0
+
+	if hasExistingLimit {
+		// Pass through
+	} else {
+		appliedLimit = limit
+		if appliedLimit <= 0 {
+			appliedLimit = t.cfg.DefaultLimit
+		}
+		if appliedLimit > t.cfg.MaxLimit {
+			appliedLimit = t.cfg.MaxLimit
+		}
+		sqlStr = sqlnorm.AppendLIMIT(sqlStr, appliedLimit)
+	}
+
+	// Enforce OFFSET
+	hasExistingOffset := sqlnorm.HasOFFSET(sqlStr)
+	if !hasExistingOffset && offset > 0 {
+		sqlStr = sqlnorm.AppendOFFSET(sqlStr, offset)
+	}
+
+	// Build warning
+	var warning string
+	if !hasExistingLimit {
+		if appliedLimit > t.cfg.MaxLimit {
+			warning = fmt.Sprintf("LIMIT capped to %d (max allowed)", appliedLimit)
+		} else {
+			warning = fmt.Sprintf("LIMIT %d applied automatically", appliedLimit)
+		}
+	}
+
+	start := time.Now()
+	rows, err := t.tx.QueryxContext(ctx, sqlStr, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query %s: %w", op, err)
+	}
+	defer rows.Close()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("query %s: %w", op, err)
+	}
+
+	var resultRows [][]interface{}
+	for rows.Next() {
+		row := make(map[string]interface{})
+		if err := rows.MapScan(row); err != nil {
+			return nil, fmt.Errorf("query %s: %w", op, err)
+		}
+		rowSlice := make([]interface{}, len(columns))
+		for i, col := range columns {
+			rowSlice[i] = row[col]
+		}
+		resultRows = append(resultRows, rowSlice)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("query %s: %w", op, err)
+	}
+
+	duration := time.Since(start)
+	hasMore := appliedLimit > 0 && len(resultRows) >= appliedLimit
+
+	t.logger.Info("tx query_with_offset",
+		"duration_ms", duration.Milliseconds(),
+		"row_count", len(resultRows),
+		"offset", offset,
+		"warning", warning,
+		"has_more", hasMore,
+	)
+
+	res := result.NewQueryResult(columns, resultRows, duration, warning)
+	res.HasMore = hasMore
+	return res, nil
+}

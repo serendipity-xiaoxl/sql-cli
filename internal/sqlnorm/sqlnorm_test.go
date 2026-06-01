@@ -222,3 +222,55 @@ func TestItoaNegative(t *testing.T) {
 		t.Errorf("AppendLIMIT with negative = %q, want %q", got, "SELECT * FROM users LIMIT -5")
 	}
 }
+
+func TestHasOFFSET(t *testing.T) {
+	tests := []struct {
+		sql  string
+		want bool
+	}{
+		{"SELECT * FROM users", false},
+		{"SELECT * FROM users LIMIT 10 OFFSET 20", true},
+		{"SELECT * FROM users LIMIT 10 offset 5", true},
+		{"SELECT * FROM users LIMIT 10 OFFSET", true},
+		{"INSERT INTO t VALUES ('OFFSET test')", false},
+		{"SELECT * FROM users WHERE name = 'offset'", false},
+		{"SELECT * FROM (SELECT id FROM t LIMIT 5 OFFSET 2) AS sub", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.sql, func(t *testing.T) {
+			got := HasOFFSET(tt.sql)
+			if got != tt.want {
+				t.Errorf("HasOFFSET(%q) = %v, want %v", tt.sql, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAppendOFFSET(t *testing.T) {
+	tests := []struct {
+		sql    string
+		offset int
+		want   string
+	}{
+		{"SELECT * FROM users LIMIT 10", 20, "SELECT * FROM users LIMIT 10 OFFSET 20"},
+		{"SELECT * FROM users LIMIT 5;", 10, "SELECT * FROM users LIMIT 5 OFFSET 10;"},
+		{"SELECT * FROM users LIMIT 100", 0, "SELECT * FROM users LIMIT 100 OFFSET 0"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.sql, func(t *testing.T) {
+			got := AppendOFFSET(tt.sql, tt.offset)
+			if got != tt.want {
+				t.Errorf("AppendOFFSET(%q, %d) = %q, want %q", tt.sql, tt.offset, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHasOFFSETKeywordEmbedded(t *testing.T) {
+	if HasOFFSET("SELECT * FROM offsetting_test") {
+		t.Error("HasOFFSET should not match OFFSET inside 'offsetting'")
+	}
+	if !HasOFFSET("SELECT * FROM offsetting_test LIMIT 5 OFFSET 2") {
+		t.Error("HasOFFSET should match standalone OFFSET after embedded occurrence")
+	}
+}

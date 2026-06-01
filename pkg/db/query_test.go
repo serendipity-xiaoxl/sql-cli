@@ -395,3 +395,325 @@ func TestQueryWithLimitIgnoreWarning(t *testing.T) {
 		t.Errorf("unmet mock expectations: %v", err)
 	}
 }
+
+func TestQueryWithOffset(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 10 OFFSET 20").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).
+			AddRow(1, "Alice").
+			AddRow(2, "Bob"))
+
+	res, err := s.QueryWithOffset(context.Background(), "SELECT * FROM users", 10, 20)
+	if err != nil {
+		t.Fatalf("QueryWithOffset() error = %v", err)
+	}
+	if res.RowCount != 2 {
+		t.Errorf("RowCount = %d, want 2", res.RowCount)
+	}
+	if res.Warning != "LIMIT 10 applied automatically" {
+		t.Errorf("Warning = %q, want %q", res.Warning, "LIMIT 10 applied automatically")
+	}
+
+	mock.ExpectClose()
+	if err := s.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOffsetRejectsNonSelect(t *testing.T) {
+	s, _ := newMockSession(t, config.DefaultConfig())
+
+	_, err := s.QueryWithOffset(context.Background(), "DELETE FROM users", 10, 0)
+	if err == nil {
+		t.Error("QueryWithOffset expected error for non-SELECT, got nil")
+	}
+
+	s.Close()
+}
+
+func TestQueryWithOffsetWithExistingLimit(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 5 OFFSET 10").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+	res, err := s.QueryWithOffset(context.Background(), "SELECT * FROM users LIMIT 5", 100, 10)
+	if err != nil {
+		t.Fatalf("QueryWithOffset() error = %v", err)
+	}
+	if res.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+	if res.Warning != "" {
+		t.Errorf("Warning = %q, want empty (existing LIMIT)", res.Warning)
+	}
+
+	mock.ExpectClose()
+	if err := s.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOffsetWithExistingOffset(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	// SQL already has OFFSET — should not append another
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 100 OFFSET 5").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+	res, err := s.QueryWithOffset(context.Background(), "SELECT * FROM users LIMIT 100 OFFSET 5", 50, 10)
+	if err != nil {
+		t.Fatalf("QueryWithOffset() error = %v", err)
+	}
+	if res.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+	if res.Warning != "" {
+		t.Errorf("Warning = %q, want empty (existing LIMIT+OFFSET)", res.Warning)
+	}
+
+	mock.ExpectClose()
+	if err := s.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOffsetZeroOffset(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	// offset=0 should NOT append OFFSET
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 100").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+	res, err := s.QueryWithOffset(context.Background(), "SELECT * FROM users", 100, 0)
+	if err != nil {
+		t.Fatalf("QueryWithOffset() error = %v", err)
+	}
+	if res.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+
+	mock.ExpectClose()
+	if err := s.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOffsetLimitCapping(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.MaxLimit = 50
+	s, mock := newMockSession(t, cfg)
+
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 50 OFFSET 100").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+	res, err := s.QueryWithOffset(context.Background(), "SELECT * FROM users", 200, 100)
+	if err != nil {
+		t.Fatalf("QueryWithOffset() error = %v", err)
+	}
+	if res.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+	if res.Warning != "LIMIT capped to 50 (max allowed)" {
+		t.Errorf("Warning = %q, want %q", res.Warning, "LIMIT capped to 50 (max allowed)")
+	}
+
+	mock.ExpectClose()
+	if err := s.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOffsetHasMore(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 5 OFFSET 10").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).
+			AddRow(1).AddRow(2).AddRow(3).AddRow(4).AddRow(5))
+
+	res, err := s.QueryWithOffset(context.Background(), "SELECT * FROM users", 5, 10)
+	if err != nil {
+		t.Fatalf("QueryWithOffset() error = %v", err)
+	}
+	if res.RowCount != 5 {
+		t.Errorf("RowCount = %d, want 5", res.RowCount)
+	}
+	if !res.HasMore {
+		t.Error("HasMore = false, want true (rowCount >= appliedLimit)")
+	}
+
+	mock.ExpectClose()
+	if err := s.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOptionsDefaultLimit(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	// Zero-value options should apply default limit (100)
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 100").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+	res, err := s.QueryWithOptions(context.Background(), "SELECT * FROM users", QueryOptions{})
+	if err != nil {
+		t.Fatalf("QueryWithOptions() error = %v", err)
+	}
+	if res.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+	if res.Warning != "LIMIT 100 applied automatically" {
+		t.Errorf("Warning = %q, want LIMIT 100 warning", res.Warning)
+	}
+
+	mock.ExpectClose()
+	s.Close()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOptionsWithOffset(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 10 OFFSET 20").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+	res, err := s.QueryWithOptions(context.Background(), "SELECT * FROM users", QueryOptions{Limit: 10, Offset: 20})
+	if err != nil {
+		t.Fatalf("QueryWithOptions() error = %v", err)
+	}
+	if res.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+
+	mock.ExpectClose()
+	s.Close()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOptionsLimitCapping(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.MaxLimit = 50
+	s, mock := newMockSession(t, cfg)
+
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 50 OFFSET 100").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+	res, err := s.QueryWithOptions(context.Background(), "SELECT * FROM users", QueryOptions{Limit: 200, Offset: 100})
+	if err != nil {
+		t.Fatalf("QueryWithOptions() error = %v", err)
+	}
+	if res.Warning != "LIMIT capped to 50 (max allowed)" {
+		t.Errorf("Warning = %q, want LIMIT capped warning", res.Warning)
+	}
+
+	mock.ExpectClose()
+	s.Close()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOptionsExistingLimit(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	// SQL has existing LIMIT — should pass through
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 5").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+	res, err := s.QueryWithOptions(context.Background(), "SELECT * FROM users LIMIT 5", QueryOptions{Limit: 100})
+	if err != nil {
+		t.Fatalf("QueryWithOptions() error = %v", err)
+	}
+	if res.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+	// Warning should be empty since SQL has existing LIMIT
+	if res.Warning != "" {
+		t.Errorf("Warning = %q, want empty for existing LIMIT", res.Warning)
+	}
+
+	mock.ExpectClose()
+	s.Close()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOptionsRejectsNonSelect(t *testing.T) {
+	s, _ := newMockSession(t, config.DefaultConfig())
+
+	_, err := s.QueryWithOptions(context.Background(), "DELETE FROM users", QueryOptions{})
+	if err == nil {
+		t.Error("QueryWithOptions expected error for non-SELECT, got nil")
+	}
+
+	s.Close()
+}
+
+func TestQueryWithOptionsZeroOffset(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	// offset=0 should not append OFFSET at all
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 50").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+
+	res, err := s.QueryWithOptions(context.Background(), "SELECT * FROM users", QueryOptions{Limit: 50, Offset: 0})
+	if err != nil {
+		t.Fatalf("QueryWithOptions() error = %v", err)
+	}
+	if res.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+
+	mock.ExpectClose()
+	s.Close()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestQueryWithOptionsHasMore(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 5 OFFSET 10").
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).
+			AddRow(1).AddRow(2).AddRow(3).AddRow(4).AddRow(5))
+
+	res, err := s.QueryWithOptions(context.Background(), "SELECT * FROM users", QueryOptions{Limit: 5, Offset: 10})
+	if err != nil {
+		t.Fatalf("QueryWithOptions() error = %v", err)
+	}
+	if !res.HasMore {
+		t.Error("HasMore = false, want true (rowCount >= limit)")
+	}
+
+	mock.ExpectClose()
+	s.Close()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+

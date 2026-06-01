@@ -489,6 +489,36 @@ func TestTxCommitFailure(t *testing.T) {
 	}
 }
 
+func TestTxRollbackFailure(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	mock.ExpectBegin()
+	mock.ExpectRollback().WillReturnError(sql.ErrConnDone)
+
+	tx, err := s.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+
+	if err := tx.Rollback(context.Background()); err == nil {
+		t.Error("Rollback() expected error for failed rollback, got nil")
+	}
+
+	// After failed rollback, the tx is marked rolled back so
+	// a second Rollback should return ErrTxDone (not the sql error).
+	if err := tx.Rollback(context.Background()); err == nil {
+		t.Error("Rollback() expected error on second call, got nil")
+	}
+
+	mock.ExpectClose()
+	if err := s.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
 func TestTxWithPolicyWarnAllowsDrop(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.DangerousOpPolicy = guard.PolicyWarn
@@ -544,6 +574,43 @@ func TestTxQueryWithExistingLimit(t *testing.T) {
 	}
 	if res.RowCount != 1 {
 		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+
+	if err := tx.Rollback(context.Background()); err != nil {
+		t.Errorf("Rollback() error = %v", err)
+	}
+
+	mock.ExpectClose()
+	if err := s.Close(); err != nil {
+		t.Errorf("Close() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}
+
+func TestTxQueryWithOffset(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 10 OFFSET 20").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(1, "Alice"))
+	mock.ExpectRollback()
+
+	tx, err := s.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("Begin() error = %v", err)
+	}
+
+	res, err := tx.QueryWithOffset(context.Background(), "SELECT * FROM users", 10, 20)
+	if err != nil {
+		t.Fatalf("tx.QueryWithOffset() error = %v", err)
+	}
+	if res.RowCount != 1 {
+		t.Errorf("RowCount = %d, want 1", res.RowCount)
+	}
+	if res.Warning != "LIMIT 10 applied automatically" {
+		t.Errorf("Warning = %q, want %q", res.Warning, "LIMIT 10 applied automatically")
 	}
 
 	if err := tx.Rollback(context.Background()); err != nil {

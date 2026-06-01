@@ -42,6 +42,11 @@ func newSessionWithDB(name, dsn string, cfg *config.Config, db *sqlx.DB) *Sessio
 	return s
 }
 
+// NewTestSession creates a Session with an existing sqlx.DB (for external tests).
+func NewTestSession(name, dsn string, cfg *config.Config, db *sqlx.DB) *Session {
+	return newSessionWithDB(name, dsn, cfg, db)
+}
+
 // newSession creates a new Session with the given configuration.
 func newSession(driver, dsn string, cfg *config.Config) (*Session, error) {
 	db, err := sqlx.Open(driver, dsn)

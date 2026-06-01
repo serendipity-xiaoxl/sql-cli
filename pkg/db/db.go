@@ -25,6 +25,10 @@ type Database interface {
 	// The limit is capped by the session's configured MaxLimit.
 	QueryWithLimit(ctx context.Context, sql string, limit int, args ...interface{}) (*result.QueryResult, error)
 
+	// QueryWithOffset executes a SELECT with pagination (LIMIT + OFFSET).
+	// The limit is capped by MaxLimit. If offset <= 0, no OFFSET is appended.
+	QueryWithOffset(ctx context.Context, sql string, limit, offset int, args ...interface{}) (*result.QueryResult, error)
+
 	// QueryStream returns a StreamResult iterator for row-by-row or batch processing.
 	QueryStream(ctx context.Context, sql string, args ...interface{}) (*result.StreamResult, error)
 
@@ -48,6 +52,9 @@ type Tx interface {
 
 	// Query executes a SELECT within the transaction.
 	Query(ctx context.Context, sql string, args ...interface{}) (*result.QueryResult, error)
+
+	// QueryWithOffset executes a SELECT with pagination within the transaction.
+	QueryWithOffset(ctx context.Context, sql string, limit, offset int, args ...interface{}) (*result.QueryResult, error)
 }
 
 // Open creates a new Session with the given driver, DSN, and options.
