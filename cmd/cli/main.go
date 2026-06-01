@@ -51,14 +51,11 @@ func init() {
 
 const appVersion = "0.2.0"
 
-// qcEnv holds values loaded from a .qcenv config file.
 type qcEnv struct {
 	dsn    string
 	driver string
 }
 
-// loadDotEnv reads .env from the current working directory.
-// Compatible with standard .env format (KEY=VALUE, # comments).
 func loadDotEnv() qcEnv {
 	var env qcEnv
 	data, err := os.ReadFile(".env")
@@ -95,7 +92,7 @@ func main() {
 	}
 
 	args := flag.Args()
-	if len(args) < 2 {
+	if len(args) < 1 {
 		usage()
 		os.Exit(1)
 	}
@@ -103,22 +100,51 @@ func main() {
 	qcFile := loadDotEnv()
 
 	cmd := args[0]
-	dsnStr := args[1]
-	if dsnStr == "" {
-		dsnStr = os.Getenv("QC_DSN")
+
+	// Resolve DSN from env / .env first, to decide arg positions.
+	envDSN := os.Getenv("QC_DSN")
+	if envDSN == "" {
+		envDSN = qcFile.dsn
 	}
-	if dsnStr == "" {
-		dsnStr = qcFile.dsn
+
+	var dsnStr, sql string
+
+	hasDSNArg := len(args) > 1 && args[1] != ""
+	needsSQL := cmd == "exec" || cmd == "query" || cmd == "stream"
+
+	switch {
+	case len(args) == 0:
+		// handled above
+	case hasDSNArg && looksLikeDSN(args[1]):
+		// Explicit DSN provided: args[1] is DSN, args[2] is SQL
+		dsnStr = args[1]
+		if len(args) > 2 {
+			sql = args[2]
+		}
+	case !hasDSNArg && envDSN != "" && needsSQL:
+		// No DSN arg, env has DSN → only SQL is expected
+		dsnStr = envDSN
+		// no SQL from args
+	case hasDSNArg && envDSN != "" && needsSQL:
+		// One arg + env DSN → arg is SQL, not DSN
+		dsnStr = envDSN
+		sql = args[1]
+	case hasDSNArg:
+		// Single arg, no env DSN → treat as DSN
+		dsnStr = args[1]
+	case envDSN != "":
+		dsnStr = envDSN
+	default:
+		fmt.Fprintf(os.Stderr, "DSN is required as argument, via QC_DSN env var, or .env file\n")
+		os.Exit(1)
 	}
+
 	if dsnStr == "" {
 		fmt.Fprintf(os.Stderr, "DSN is required as argument, via QC_DSN env var, or .env file\n")
 		os.Exit(1)
 	}
-	sql := ""
-	if len(args) > 2 {
-		sql = args[2]
-	}
 
+	// Driver: CLI flag > .env file > DSN auto-detect
 	driver := driverFlag
 	if driver == "" {
 		driver = qcFile.driver
@@ -241,10 +267,11 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `qc — multi-database CLI for AI Agents (MySQL, PostgreSQL, SQLite)
 
 Usage:
-  qc ping   [dsn]
-  qc exec   [dsn] [<sql>]   [--file <path>] [--transaction] [--continue-on-error]
-  qc query  [dsn] [<sql>]   [--limit N] [--offset N] [--timeout D]
-  qc stream [dsn] <sql>     [--limit N] [--timeout D]
+  qc ping                     # DSN from env or .env
+  qc ping   <dsn>
+  qc exec   [dsn] [<sql>]     [--file <path>] [--transaction] [--continue-on-error]
+  qc query  [dsn] [<sql>]     [--limit N] [--offset N] [--timeout D]
+  qc stream [dsn] <sql>       [--limit N] [--timeout D]
 
 Flags:
   --driver <name>       database driver (mysql/postgres/sqlite, auto-detected)
@@ -257,12 +284,24 @@ Flags:
   --force               skip dangerous operation confirmation
   --version             print version and exit
 
-Config file (.env in current directory):
-  echo 'QC_DSN=user:pass@tcp(host:3306)/db' > .env
-  echo 'QC_DRIVER=mysql'                      >> .env
+Config (.env in current directory):
+  QC_DSN=user:pass@tcp(host:3306)/db
+  QC_DRIVER=mysql
 
 Priority: CLI arguments > environment variables > .env file
 `)
+}
+
+// looksLikeDSN returns true if s looks like a database connection string.
+func looksLikeDSN(s string) bool {
+	return strings.Contains(s, "@tcp(") ||
+		strings.Contains(s, "@unix(") ||
+		strings.HasPrefix(s, "postgres://") ||
+		strings.HasPrefix(s, "postgresql://") ||
+		strings.HasPrefix(s, "mysql://") ||
+		strings.HasPrefix(s, "file:") ||
+		strings.HasPrefix(s, "/") ||
+		s == ":memory:"
 }
 
 func fatal(format string, args ...interface{}) {
