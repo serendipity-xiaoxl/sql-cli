@@ -717,3 +717,41 @@ func TestQueryWithOptionsHasMore(t *testing.T) {
 	}
 }
 
+
+func TestQueryStringColumnNotBase64(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	// Simulate a VARCHAR column: sqlx.MapScan returns []byte for those
+	mock.ExpectQuery("SELECT \\* FROM users LIMIT 100").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).
+			AddRow(1, []byte("Alice")).
+			AddRow(2, []byte("Bob")))
+
+	res, err := s.Query(context.Background(), "SELECT * FROM users")
+	if err != nil {
+		t.Fatalf("Query() error = %v", err)
+	}
+	if res.RowCount != 2 {
+		t.Errorf("RowCount = %d, want 2", res.RowCount)
+	}
+
+	// Verify rows contain strings, not []byte
+	for i, row := range res.Rows {
+		name, ok := row[1].(string)
+		if !ok {
+			t.Errorf("Rows[%d][1] type = %T, want string (got %v)", i, row[1], row[1])
+		}
+		if i == 0 && name != "Alice" {
+			t.Errorf("Rows[0][1] = %q, want %q", name, "Alice")
+		}
+		if i == 1 && name != "Bob" {
+			t.Errorf("Rows[1][1] = %q, want %q", name, "Bob")
+		}
+	}
+
+	mock.ExpectClose()
+	s.Close()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Errorf("unmet mock expectations: %v", err)
+	}
+}

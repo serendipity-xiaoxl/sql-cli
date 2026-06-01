@@ -16,16 +16,26 @@ var (
 	limit   int
 	offset  int
 	timeout time.Duration
+	version bool
 )
 
 func init() {
 	flag.IntVar(&limit, "limit", 0, "query row limit (0=default)")
 	flag.IntVar(&offset, "offset", 0, "query row offset")
 	flag.DurationVar(&timeout, "timeout", 0, "query timeout (0=default)")
+	flag.BoolVar(&version, "version", false, "print version and exit")
 }
+
+const appVersion = "0.1.0"
 
 func main() {
 	flag.Parse()
+
+	if version {
+		fmt.Fprintf(os.Stderr, "sql-cli version %s\n", appVersion)
+		os.Exit(0)
+	}
+
 	args := flag.Args()
 	if len(args) < 2 {
 		usage()
@@ -34,6 +44,13 @@ func main() {
 
 	cmd := args[0]
 	dsn := args[1]
+	if dsn == "" {
+		dsn = os.Getenv("SQL_CLI_DSN")
+	}
+	if dsn == "" {
+		fmt.Fprintf(os.Stderr, "DSN is required as argument or via SQL_CLI_DSN env var\n")
+		os.Exit(1)
+	}
 	sql := ""
 	if len(args) > 2 {
 		sql = args[2]
@@ -112,6 +129,15 @@ Usage:
   sql-cli exec   <dsn> <sql>
   sql-cli query  <dsn> [sql]   [--limit N] [--offset N] [--timeout D]
   sql-cli stream <dsn> <sql>   [--limit N] [--timeout D]
+
+Flags:
+  --limit int    query row limit (0=default)
+  --offset int   query row offset
+  --timeout d    query timeout (0=default, e.g. 30s)
+  --version      print version and exit
+
+Environment:
+  SQL_CLI_DSN    default DSN if not provided as argument
 `)
 }
 

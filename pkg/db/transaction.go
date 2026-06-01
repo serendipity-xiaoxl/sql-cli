@@ -255,6 +255,7 @@ func (t *transaction) Query(ctx context.Context, sqlStr string, args ...interfac
 		if err := rows.MapScan(row); err != nil {
 			return nil, fmt.Errorf("query %s: %w", op, err)
 		}
+		convertRowBytes(row)
 		rowSlice := make([]interface{}, len(columns))
 		for i, col := range columns {
 			rowSlice[i] = row[col]
@@ -344,6 +345,7 @@ func (t *transaction) QueryWithOffset(ctx context.Context, sqlStr string, limit,
 		if err := rows.MapScan(row); err != nil {
 			return nil, fmt.Errorf("query %s: %w", op, err)
 		}
+		convertRowBytes(row)
 		rowSlice := make([]interface{}, len(columns))
 		for i, col := range columns {
 			rowSlice[i] = row[col]

@@ -4,3 +4,4 @@
 vendor/
 /cli
 /sql-cli
+/qc

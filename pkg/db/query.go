@@ -9,6 +9,17 @@ import (
 	"github.com/xiaoxl/sql-cli/pkg/result"
 )
 
+// convertRowBytes converts []byte values to string after MapScan.
+// sqlx.MapScan returns []byte for VARCHAR/TEXT columns, and json.Marshal
+// encodes []byte as base64. This ensures string values are encoded as strings.
+func convertRowBytes(row map[string]interface{}) {
+	for k, v := range row {
+		if b, ok := v.([]byte); ok {
+			row[k] = string(b)
+		}
+	}
+}
+
 // ErrNonSelectQuery is returned when Query/QueryWithLimit is called with a non-SELECT statement.
 var ErrNonSelectQuery = fmt.Errorf("only SELECT queries are allowed")
 
@@ -98,6 +109,7 @@ func (s *Session) queryWithLimit(ctx context.Context, sqlStr string, limit int, 
 		if err := rows.MapScan(row); err != nil {
 			return nil, fmt.Errorf("query %s: %w", op, err)
 		}
+		convertRowBytes(row)
 		rowSlice := make([]interface{}, len(columns))
 		for i, col := range columns {
 			rowSlice[i] = row[col]
@@ -203,6 +215,7 @@ func (s *Session) queryWithOffset(ctx context.Context, sqlStr string, limit, off
 		if err := rows.MapScan(row); err != nil {
 			return nil, fmt.Errorf("query %s: %w", op, err)
 		}
+		convertRowBytes(row)
 		rowSlice := make([]interface{}, len(columns))
 		for i, col := range columns {
 			rowSlice[i] = row[col]
@@ -300,6 +313,7 @@ func (s *Session) QueryWithOptions(ctx context.Context, sqlStr string, opts Quer
 			if err := rows.MapScan(row); err != nil {
 				return nil, fmt.Errorf("query %s: %w", op, err)
 			}
+		convertRowBytes(row)
 			rowSlice := make([]interface{}, len(columns))
 			for i, col := range columns {
 				rowSlice[i] = row[col]
@@ -357,6 +371,7 @@ func (s *Session) QueryWithOptions(ctx context.Context, sqlStr string, opts Quer
 		if err := rows.MapScan(row); err != nil {
 			return nil, fmt.Errorf("query %s: %w", op, err)
 		}
+		convertRowBytes(row)
 		rowSlice := make([]interface{}, len(columns))
 		for i, col := range columns {
 			rowSlice[i] = row[col]

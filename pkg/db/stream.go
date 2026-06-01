@@ -108,6 +108,7 @@ func (s *Session) QueryStream(ctx context.Context, sqlStr string, args ...interf
 				sr.SetError(fmt.Errorf("query %s: %w", op, err))
 				return
 			}
+		convertRowBytes(row)
 			rowCount++
 
 			select {
