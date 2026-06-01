@@ -1,312 +1,217 @@
-# sql-cli 操作手册
+# qc 操作手册
 
-## 概述
+`qc` 是一个 MySQL 命令行工具，用于安全、结构化的数据库操作。所有输出均为 JSON 格式，内置安全守卫机制，专为 AI Agent 及开发者设计。
 
-sql-cli 是一个 Go 语言库和 CLI 工具，用于安全、结构化的 MySQL 数据库操作。专为人工使用和 AI Agent 调用设计，提供 JSON 友好的结果类型、自动安全守卫和流式查询支持。
-
-### 仓库地址
-
-```
-github.com/xiaoxl/sql-cli
-```
+版本：0.1.0
 
 ---
 
-## 构建与安装
+## 安装
 
 ### 环境要求
 
-- Go 1.22 或更高版本
-- MySQL 8.0+（或兼容的 MySQL 数据库）
+- Go 1.22+
 
-### 构建 CLI
+### 编译
 
 ```bash
-# 使用 make（推荐）
-make build
-./qc --help
-
-# 或手动构建
-go build -o qc ./cmd/cli/
-./qc --help
+make build      # 编译生成 qc 二进制文件
+make test       # 运行测试
+make lint       # 代码检查
 ```
 
-### 构建库
+编译完成后，将项目根目录下的 `qc` 文件放到 `PATH` 中即可使用。
+
+---
+
+## 快速入门
 
 ```bash
-go build ./...
-```
+# 测试连接
+qc ping "test:test@123@tcp(115.29.209.119:3306)/test"
 
-### 运行测试
+# 建表
+qc exec "test:test@123@tcp(115.29.209.119:3306)/test" \
+  "CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(100), age INT)"
 
-```bash
-# 全部测试
-make test
+# 插入数据
+qc exec "test:test@123@tcp(115.29.209.119:3306)/test" \
+  "INSERT INTO users (name, age) VALUES ('张三', 25), ('李四', 30)"
 
-# 竞态检测
-go test ./... -count=1 -race
+# 查询（自动限制返回行数）
+qc query "test:test@123@tcp(115.29.209.119:3306)/test" "SELECT * FROM users"
 
-# 代码覆盖率
-make coverage
+# 分页查询
+qc query "test:test@123@tcp(115.29.209.119:3306)/test" \
+  --limit 10 --offset 20 "SELECT * FROM users"
 
-# 静态检查
-make lint
-
-# 清理构建产物
-make clean
+# 流式输出大数据集
+qc stream "test:test@123@tcp(115.29.209.119:3306)/test" "SELECT * FROM large_table"
 ```
 
 ---
 
-## CLI 命令
+## 命令参考
 
-CLI（`qc`）封装了库功能，所有输出均为 JSON 格式。MySQL DSN 可通过命令行参数或 `SQL_CLI_DSN` 环境变量提供。
+### 通用约定
 
-### ping —— 健康检查
+- DSN 格式：`用户名:密码@tcp(主机:端口)/数据库名`
+- 所有命令输出均为 JSON
+- 可通过环境变量 `QC_DSN` 设置默认 DSN
 
-```
-sql-cli ping <dsn>
-```
-
-检查数据库连通性。成功返回 `{"status":"ok"}`。
-
-```bash
-sql-cli ping "user:pass@tcp(127.0.0.1:3306)/mydb"
-```
-
-### exec —— 执行 DDL/DML
+### ping — 连通性检查
 
 ```
-sql-cli exec <dsn> <sql>
+qc ping <dsn>
 ```
 
-执行 CREATE、ALTER、INSERT、UPDATE、DELETE 语句。返回 JSON，包含 `last_insert_id`、`rows_affected`、`duration_ms`。
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| dsn | 否* | 数据库连接串（若设置了 `QC_DSN` 则可省略） |
 
-```bash
-sql-cli exec "root:pass@tcp(127.0.0.1:3306)/test" "CREATE TABLE users (id INT AUTO_INCREMENT PRIMARY KEY, name TEXT)"
-sql-cli exec "root:pass@tcp(127.0.0.1:3306)/test" "INSERT INTO users (name) VALUES ('Alice')"
-```
-
-### query —— 执行 SELECT
-
-```
-sql-cli query <dsn> <sql> [flags]
-```
-
-执行 SELECT 查询，自动强制 LIMIT。返回 JSON，包含 `columns`、`rows`、`row_count`、`duration_ms`、`warning`、`has_more`。
-
-参数：
-
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--limit N` | 100 | 最大返回行数 |
-| `--offset N` | 0 | 跳过的行数（分页） |
-| `--timeout D` | （会话默认） | 查询超时，如 `30s` |
-
-```bash
-# 基本查询（自动追加 LIMIT 100）
-sql-cli query "user:pass@tcp(127.0.0.1:3306)/test" "SELECT * FROM users"
-
-# 分页查询
-sql-cli query "user:pass@tcp(127.0.0.1:3306)/test" --limit 10 --offset 20 "SELECT * FROM users"
-```
-
-### stream —— 流式查询
-
-```
-sql-cli stream <dsn> <sql> [flags]
-```
-
-执行 SELECT 查询，逐行输出 JSON。适用于大数据集。
-
-```bash
-sql-cli stream "user:pass@tcp(127.0.0.1:3306)/test" "SELECT * FROM large_table"
-```
-
-输出格式（每行一个 JSON 对象）：
+成功输出：
 
 ```json
-{"row": {"id": 1, "name": "Alice"}, "index": 0}
-{"row": {"id": 2, "name": "Bob"}, "index": 1}
+{"status":"ok"}
 ```
 
-### 全局参数
+### exec — 执行写操作
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `--version` | false | 打印版本号并退出 |
+```
+qc exec <dsn> <sql>
+```
+
+| 参数 | 必填 | 说明 |
+|------|------|------|
+| dsn | 否* | 数据库连接串 |
+| sql | 是 | 要执行的 SQL 语句 |
+
+支持的 SQL 类型：
+
+- `CREATE TABLE` / `ALTER TABLE`
+- `INSERT`
+- `UPDATE`（必须有 WHERE 条件）
+- `DELETE`（必须有 WHERE 条件）
+
+**注意**：`DROP TABLE` 和 `TRUNCATE TABLE` 默认被拦截，`UPDATE`/`DELETE` 不带 WHERE 也会被拒绝。
+
+成功输出示例：
+
+```json
+{"last_insert_id": 1, "rows_affected": 1, "duration_ms": 15}
+```
+
+### query — 执行查询
+
+```
+qc query <dsn> <sql> [选项]
+```
+
+| 参数 / 选项 | 必填 | 默认值 | 说明 |
+|-------------|------|--------|------|
+| dsn | 否* | — | 数据库连接串 |
+| sql | 是 | — | SELECT 语句 |
+| `--limit N` | 否 | 100 | 返回行数上限 |
+| `--offset N` | 否 | 0 | 跳过前 N 行 |
+| `--timeout D` | 否 | 30s | 查询超时（如 `10s`、`1m`） |
+
+**关键行为**：
+
+- 如果 SQL 中未写 `LIMIT`，自动追加 `LIMIT 100`
+- `--limit` 不能超过全局上限（1000），超出会被截断
+- 当返回行数等于 limit 时，`has_more` 为 `true`，表示可能还有数据
+- 非 SELECT 语句会被拒绝执行
+
+成功输出示例：
+
+```json
+{
+  "columns": ["id", "name", "age"],
+  "rows": [[1, "张三", 25], [2, "李四", 30]],
+  "row_count": 2,
+  "duration_ms": 45,
+  "warning": "LIMIT 100 applied automatically",
+  "has_more": false
+}
+```
+
+### stream — 流式查询
+
+```
+qc stream <dsn> <sql> [选项]
+```
+
+| 参数 / 选项 | 必填 | 默认值 | 说明 |
+|-------------|------|--------|------|
+| dsn | 否* | — | 数据库连接串 |
+| sql | 是 | — | SELECT 语句 |
+| `--limit N` | 否 | 100 | 返回行数上限 |
+| `--timeout D` | 否 | 30s | 查询超时 |
+
+与 `query` 的区别：`stream` 逐行输出 JSON，每行一个 JSON 对象，适合处理大数据集，避免内存中一次性加载全部数据。
+
+输出示例（每行一条）：
+
+```json
+{"row": {"id": 1, "name": "张三"}, "index": 0}
+{"row": {"id": 2, "name": "李四"}, "index": 1}
+```
+
+### 全局选项
+
+| 选项 | 说明 |
+|------|------|
+| `--version` | 打印版本号 |
 
 ### 环境变量
 
 | 变量 | 说明 |
 |------|------|
-| `QC_DSN` | CLI 命令的默认 DSN |
+| `QC_DSN` | 默认数据库连接串，设置后命令中的 dsn 参数可省略 |
 
 ---
 
-## 库 API
+## 安全机制
 
-### 打开会话
+`qc` 内置多层安全防护，防止误操作和危险查询。
 
-```go
-import (
-    "github.com/xiaoxl/sql-cli/pkg/db"
-    "github.com/xiaoxl/sql-cli/pkg/config"
-)
+### LIMIT 强制
 
-// 基本用法
-sess, err := db.Open("mysql", "user:pass@tcp(127.0.0.1:3306)/mydb")
+所有查询自动限制返回行数，防止全量扫描导致内存溢出或数据库压力。
 
-// 带配置选项
-sess, err := db.Open("mysql", dsn,
-    config.WithDefaultLimit(50),
-    config.WithMaxLimit(500),
-    config.WithQueryTimeout(10*time.Second),
-    config.WithDangerousOpPolicy(guard.PolicyBlock),
-)
-defer sess.Close()
-```
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| 默认 LIMIT | 100 | SQL 中无 LIMIT 时自动追加 |
+| 最大 LIMIT | 1000 | 任何查询的 LIMIT 不能超过此值 |
 
-### 配置选项
+输出中的 `warning` 字段和 `has_more` 字段可帮助判断数据是否被截断。
 
-`pkg/config` 中的所有配置选项：
+### 危险操作拦截
 
-| 选项 | 默认值 | 说明 |
-|------|--------|------|
-| `WithName(n)` | DSN | 会话标识符 |
-| `WithRejectNoWhere(b)` | true | 拒绝无 WHERE 的 UPDATE/DELETE |
-| `WithDefaultLimit(n)` | 100 | 无 LIMIT 查询的默认值 |
-| `WithMaxLimit(n)` | 1000 | 最大允许的 LIMIT 值 |
-| `WithMaxRows(n)` | 1000 | 单次查询最大行数 |
-| `WithQueryTimeout(d)` | 30s | 默认查询超时 |
-| `WithMaxOpenConns(n)` | 25 | 连接池最大连接数 |
-| `WithMaxIdleConns(n)` | 5 | 最大空闲连接数 |
-| `WithConnMaxLifetime(d)` | 5m | 连接最大复用时间 |
-| `WithStreamBatchSize(n)` | 50 | 流通道缓冲区大小 |
-| `WithDangerousOpPolicy(p)` | PolicyBlock | DROP/TRUNCATE 处理策略 |
-| `WithLogSanitizeParams(b)` | false | 日志中脱敏 SQL 参数 |
-| `WithMaxConcurrentQueries(n)` | 0 | 最大并发查询数（0 = 无限制） |
+以下操作默认被拦截，执行时直接返回错误：
 
-### 执行语句
+| 操作 | 处理方式 |
+|------|----------|
+| `DROP TABLE` | 拦截 |
+| `TRUNCATE TABLE` | 拦截 |
+| `UPDATE` 不带 `WHERE` | 拦截 |
+| `DELETE` 不带 `WHERE` | 拦截 |
 
-```go
-ctx := context.Background()
+这是硬性保护，在工具层面彻底杜绝误删表、误清数据等事故。
 
-// INSERT
-res, err := sess.Exec(ctx, "INSERT INTO users (name) VALUES (?)", "Alice")
-fmt.Printf("LastInsertID: %d\n", res.LastInsertID)
+### 非查询语句隔离
 
-// UPDATE with WHERE（默认拒绝无 WHERE 的 UPDATE）
-res, err := sess.Exec(ctx, "UPDATE users SET name = ? WHERE id = ?", "Bob", 1)
-fmt.Printf("RowsAffected: %d\n", res.RowsAffected)
+`query` 和 `stream` 命令只接受 SELECT 语句，任何 INSERT/UPDATE/DELETE/DROP 等写操作都会被拒绝，防止用错命令。
 
-// CREATE TABLE
-_, err := sess.Exec(ctx, "CREATE TABLE IF NOT EXISTS items (id INT AUTO_INCREMENT PRIMARY KEY, name TEXT)")
+### 查询超时
 
-// DROP TABLE（默认被拦截）
-_, err := sess.Exec(ctx, "DROP TABLE items")
-// 返回 guard.ErrDangerousOp
-
-// DROP TABLE with PolicyWarn（允许执行但记录警告）
-cfg.DangerousOpPolicy = guard.PolicyWarn
-_, err := sess.Exec(ctx, "DROP TABLE items")
-```
-
-### 查询数据
-
-```go
-// 基本查询（自动追加 LIMIT 100）
-res, err := sess.Query(ctx, "SELECT * FROM users")
-fmt.Printf("Columns: %v\n", res.Columns)
-fmt.Printf("Rows: %v\n", res.Rows)
-fmt.Printf("Warning: %s\n", res.Warning) // "LIMIT 100 applied automatically"
-fmt.Printf("HasMore: %v\n", res.HasMore) // 达到限制时为 true
-
-// 指定 LIMIT
-res, err := sess.QueryWithLimit(ctx, "SELECT * FROM users", 50)
-
-// 分页查询（LIMIT 10 OFFSET 20）
-res, err := sess.QueryWithOffset(ctx, "SELECT * FROM users", 10, 20)
-
-// 参数化查询
-res, err := sess.Query(ctx, "SELECT * FROM users WHERE id = ?", 42)
-
-// 非 SELECT 语句被拒绝
-_, err := sess.Query(ctx, "DELETE FROM users")
-// 返回 ErrNonSelectQuery
-```
-
-### 流式查询
-
-```go
-sr, err := sess.QueryStream(ctx, "SELECT * FROM large_table")
-if err != nil {
-    log.Fatal(err)
-}
-defer sr.Close() // 提前关闭以停止流
-
-for sr.Next() {
-    row := sr.Scan()
-    fmt.Println(row)
-    // row 类型为 map[string]interface{}，列名作为键
-}
-
-if err := sr.Err(); err != nil {
-    log.Fatal(err)
-}
-```
-
-### 事务
-
-```go
-tx, err := sess.Begin(ctx)
-if err != nil {
-    log.Fatal(err)
-}
-defer tx.Rollback(ctx) // 安全 —— 已提交后为 no-op
-
-tx.Exec(ctx, "INSERT INTO users (name) VALUES (?)", "Charlie")
-tx.Exec(ctx, "UPDATE accounts SET balance = balance - 100 WHERE id = ?", 1)
-
-if err := tx.Commit(ctx); err != nil {
-    log.Fatal(err)
-}
-```
-
-事务特性：
-- **超时自动回滚**：事务在 `QueryTimeout` 内未提交则自动回滚。
-- **安全守卫**：事务内的 Exec/Query 同样受保护（DROP 拦截、无 WHERE 拒绝、LIMIT 强制）。
-- **重复提交/回滚**：返回 `ErrTxDone`。
-
-### 多会话注册表
-
-```go
-reg := registry.NewRegistry()
-
-// 打开命名会话
-reg.Open("prod", "mysql", dsn1)
-reg.Open("staging", "mysql", dsn2)
-
-// 按名称获取
-sess, err := reg.Get("prod")
-
-// 列出所有会话
-names := reg.List() // ["prod", "staging"]
-
-// 关闭单个
-reg.Close("staging")
-
-// 关闭全部
-reg.CloseAll()
-```
+每个查询都有执行超时限制（默认 30 秒），超时自动取消，避免长时间阻塞。
 
 ---
 
-## 结果格式
+## 输出格式详解
 
-所有结果类型均支持直接 JSON 序列化，便于 Agent 解析。
-
-### ExecResult（DDL/DML）
+### 写操作结果 (exec)
 
 ```json
 {
@@ -318,12 +223,12 @@ reg.CloseAll()
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `last_insert_id` | int64 | 最后插入的自增 ID；为 0 时省略 |
-| `rows_affected` | int64 | 受影响的行数 |
-| `duration_ms` | int64 | 执行耗时（毫秒） |
-| `error` | string | 错误信息；为空时省略 |
+| `last_insert_id` | 整数 | 自增主键 ID（INSERT 时有效，为 0 时不显示） |
+| `rows_affected` | 整数 | 影响的行数 |
+| `duration_ms` | 整数 | 执行耗时（毫秒） |
+| `error` | 字符串 | 仅出错时出现 |
 
-### QueryResult（SELECT）
+### 查询结果 (query)
 
 ```json
 {
@@ -338,198 +243,141 @@ reg.CloseAll()
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `columns` | []string | 列名，顺序与查询一致 |
-| `rows` | [][]interface{} | 行数据，每行为按列顺序的值切片 |
-| `row_count` | int | 返回的行数 |
-| `duration_ms` | int64 | 查询执行耗时（毫秒） |
-| `warning` | string | 警告信息（如自动追加 LIMIT）；为空时省略 |
-| `has_more` | bool | 行数达到限制时为 true（可能还有更多数据） |
-| `error` | string | 错误信息；为空时省略 |
+| `columns` | 字符串数组 | 列名列表 |
+| `rows` | 二维数组 | 数据行，每行按 columns 顺序排列 |
+| `row_count` | 整数 | 实际返回行数 |
+| `duration_ms` | 整数 | 查询耗时（毫秒） |
+| `warning` | 字符串 | 仅在自动追加 LIMIT 或限流截断时出现 |
+| `has_more` | 布尔 | `true` 表示数据可能被截断，还有更多行 |
+| `error` | 字符串 | 仅出错时出现 |
 
-### StreamRow
+### 流式行 (stream)
+
+每行独立输出一个 JSON 对象：
 
 ```json
-{"row": {"id": 1, "name": "Alice", "email": "alice@example.com"}, "index": 0}
-{"row": {"id": 2, "name": "Bob", "email": "bob@example.com"}, "index": 1}
+{"row": {"id": 1, "name": "Alice"}, "index": 0}
 ```
-
-每行为一个 JSON 对象：
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `row` | map[string]interface{} | 列名到值的映射 |
-| `index` | int64 | 顺序行索引（从 0 开始） |
-| `error` | string | 行级错误；为空时省略 |
+| `row` | 对象 | 列名到值的映射 |
+| `index` | 整数 | 行序号（从 0 开始） |
 
 ---
 
-## 安全特性
+## 作为 Go 库使用
 
-### 1. 自动 LIMIT 强制
+如果你的项目是 Go 语言，可以直接引入 `qc` 的库包编程调用。
 
-所有无显式 LIMIT 子句的 SELECT 查询会自动追加 `DefaultLimit`（100）。限制值上限为 `MaxLimit`（1000）。`has_more` 字段指示返回结果之后是否可能还有更多数据。
+### 引入依赖
 
-```go
-// 自动追加：SELECT * FROM users LIMIT 100
-res, _ := sess.Query(ctx, "SELECT * FROM users")
-// Warning: "LIMIT 100 applied automatically"
-// HasMore: 返回恰好 100 行时为 true
+```bash
+go get github.com/xiaoxl/sql-cli
 ```
 
-### 2. 危险操作守卫
-
-`DROP TABLE` 和 `TRUNCATE TABLE` 默认被拦截（`PolicyBlock`）。可配置为警告（`PolicyWarn`）或静默放行（`PolicyAllow`）。
+### 基本用法
 
 ```go
-// 被拦截
-_, err := sess.Exec(ctx, "DROP TABLE users")
-// 返回 guard.ErrDangerousOp
+import (
+    "context"
+    "github.com/xiaoxl/sql-cli/pkg/db"
+    "github.com/xiaoxl/sql-cli/pkg/config"
+)
 
-// 警告模式（允许执行但记录警告日志）
-cfg.DangerousOpPolicy = guard.PolicyWarn
-sess.Exec(ctx, "DROP TABLE users")
+func main() {
+    sess, _ := db.Open("mysql", "user:pass@tcp(127.0.0.1:3306)/mydb",
+        config.WithDefaultLimit(50),
+        config.WithQueryTimeout(10 * time.Second),
+    )
+    defer sess.Close()
+
+    ctx := context.Background()
+
+    // 执行写操作
+    res, _ := sess.Exec(ctx, "INSERT INTO users (name) VALUES (?)", "Alice")
+    // res.LastInsertID, res.RowsAffected, res.DurationMs
+
+    // 查询（自动 LIMIT）
+    q, _ := sess.Query(ctx, "SELECT * FROM users")
+    // q.Columns, q.Rows, q.RowCount, q.Warning, q.HasMore
+
+    // 分页
+    q, _ = sess.QueryWithOffset(ctx, "SELECT * FROM users", 10, 20)
+
+    // 流式
+    sr, _ := sess.QueryStream(ctx, "SELECT * FROM large_table")
+    for sr.Next() {
+        row := sr.Scan() // map[string]interface{}
+    }
+
+    // 事务
+    tx, _ := sess.Begin(ctx)
+    tx.Exec(ctx, "INSERT INTO users (name) VALUES (?)", "Bob")
+    tx.Commit(ctx)
+}
 ```
 
-### 3. 无条件修改保护
+### 可配置项
 
-`UPDATE` 和 `DELETE` 语句缺少 `WHERE` 子句时默认被拒绝。由 `RejectNoWhere` 控制（默认 `true`）。
+| 选项 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `WithDefaultLimit` | int | 100 | 自动追加的 LIMIT 值 |
+| `WithMaxLimit` | int | 1000 | LIMIT 上限 |
+| `WithMaxRows` | int | 1000 | 最大返回行数 |
+| `WithQueryTimeout` | duration | 30s | 查询超时 |
+| `WithMaxOpenConns` | int | 25 | 连接池最大连接数 |
+| `WithMaxIdleConns` | int | 5 | 最大空闲连接 |
+| `WithConnMaxLifetime` | duration | 5m | 连接复用时间 |
+| `WithStreamBatchSize` | int | 50 | 流缓冲区大小 |
+| `WithDangerousOpPolicy` | Policy | Block | 危险操作策略 Block/Warn/Allow |
+| `WithRejectNoWhere` | bool | true | 拒绝无 WHERE 的 UPDATE/DELETE |
+| `WithLogSanitizeParams` | bool | false | 日志参数脱敏 |
+| `WithMaxConcurrentQueries` | int | 0 | 并发上限（0=不限制） |
+
+### 多会话管理
 
 ```go
-// 被拒绝
-_, err := sess.Exec(ctx, "DELETE FROM users")
-// 返回 ErrUnconditionalModify
+reg := registry.NewRegistry()
+reg.Open("prod", "mysql", "user:pass@tcp(prod-db:3306)/db")
+reg.Open("dev", "mysql", "user:pass@tcp(dev-db:3306)/db")
 
-// 允许
-_, err := sess.Exec(ctx, "DELETE FROM users WHERE id = 1")
-
-// 关闭保护
-cfg.RejectNoWhere = false
+prod, _ := reg.Get("prod")
+names := reg.List() // ["prod", "dev"]
+reg.CloseAll()
 ```
-
-### 4. 非 SELECT 查询拒绝
-
-`Query()` 和 `QueryStream()` 拒绝所有非 SELECT/WITH 语句。
-
-### 5. 查询超时
-
-所有查询都有可配置的超时。会话的 `QueryTimeout`（默认 30s）在 context 无截止时间时自动应用。
-
-### 6. 并发限制
-
-`MaxConcurrentQueries`（默认 0 = 无限制）限制单个会话的并发查询数。
 
 ---
 
-## 测试指南
-
-### 运行测试
+## 测试
 
 ```bash
-# 全部测试
-go test ./... -count=1
-
-# 竞态检测
-go test ./... -count=1 -race
-
-# 覆盖率
-go test ./... -count=1 -coverprofile=coverage.out
-go tool cover -func=coverage.out
+make test            # 全量单元测试
+make coverage        # 覆盖率报告
+go test -race ./...  # 竞态检测
 ```
 
-### 测试结构
-
-所有测试使用 `github.com/DATA-DOG/go-sqlmock` 模拟 MySQL，无需真实数据库。
-
-```go
-func newMockSession(t *testing.T, cfg *config.Config) (*Session, sqlmock.Sqlmock) {
-    db, mock, _ := sqlmock.New(sqlmock.MonitorPingsOption(true))
-    sdb := sqlx.NewDb(db, "sqlmock")
-    s := NewTestSession("test", "mock://", cfg, sdb)
-    return s, mock
-}
-```
-
-### 测试示例
-
-```go
-func TestQuerySelectWithoutLimit(t *testing.T) {
-    s, mock := newMockSession(t, config.DefaultConfig())
-
-    mock.ExpectQuery("SELECT \\* FROM users LIMIT 100").
-        WillReturnRows(sqlmock.NewRows([]string{"name"}))
-
-    res, err := s.Query(context.Background(), "SELECT * FROM users")
-    assert.NoError(t, err)
-    assert.Equal(t, "LIMIT 100 applied automatically", res.Warning)
-    assert.False(t, res.HasMore)
-
-    mock.ExpectClose()
-    s.Close()
-    mock.ExpectationsWereMet()
-}
-```
-
-### Docker MySQL 集成测试
-
-需要真实 MySQL 实例时：
+使用 Docker MySQL 进行集成测试：
 
 ```bash
-# 启动 MySQL 8.0 容器
-docker run -d \
-  --name sql-cli-mysql \
+docker run -d --name qc-mysql \
   -e MYSQL_ROOT_PASSWORD=testpass \
   -e MYSQL_DATABASE=testdb \
-  -p 3307:3306 \
-  mysql:8
+  -p 3307:3306 mysql:8
 
-# 等待 MySQL 就绪
-sleep 10
+QC_DSN="root:testpass@tcp(127.0.0.1:3307)/testdb" go test ./...
 
-# 运行集成测试
-QC_TEST_DSN="root:testpass@tcp(127.0.0.1:3307)/testdb" go test ./... -count=1
-
-# 用完后停止并删除
-docker stop sql-cli-mysql && docker rm sql-cli-mysql
+docker stop qc-mysql && docker rm qc-mysql
 ```
-
-### 当前覆盖率
-
-| 包 | 覆盖率 |
-|----|--------|
-| `internal/sanitize` | 100.0% |
-| `internal/sqlnorm` | 98.7% |
-| `pkg/config` | 92.6% |
-| `pkg/db` | 90.4% |
-| `pkg/guard` | 100.0% |
-| `pkg/registry` | 100.0% |
-| `pkg/result` | 100.0% |
 
 ---
 
-## 包结构
+## 常见错误
 
-```
-sql-cli/
-  cmd/cli/              CLI 入口
-  internal/
-    sanitize/           SQL 参数脱敏
-    sqlnorm/            SQL 规范化（操作类型、WHERE、LIMIT、OFFSET 检测）
-      pagination.go     游标分页
-  pkg/
-    config/             配置系统（函数式选项）
-    db/                 核心库（Session、Exec、Query、Stream、Transaction）
-      db.go             Database/Tx 接口
-      session.go        Session（Open、Close、Ping、Begin、并发控制）
-      executor.go       Exec 实现
-      query.go          Query、QueryWithLimit、QueryWithOffset
-      stream.go         QueryStream（通道式流查询）
-      transaction.go    Transaction 封装（自动回滚、安全守卫）
-    guard/              危险操作策略执行
-    registry/           多会话注册表
-    result/             结构化结果类型（ExecResult、QueryResult、StreamResult）
-  doc/
-    product-plan.md     功能规格与优先级
-    operation-manual.md 英文操作手册
-    operation-manual-zh.md 本文件
-    test-report.md      测试覆盖率报告
-```
+| 错误信息 | 原因 | 解决 |
+|----------|------|------|
+| `dangerous operation blocked` | 执行了 DROP/TRUNCATE | 确认操作必要后调整策略 |
+| `UPDATE/DELETE without WHERE clause` | 写操作缺少 WHERE 条件 | 添加 WHERE 子句 |
+| `only SELECT queries are allowed` | 用 query/stream 执行了非查询语句 | 改用 exec 命令 |
+| `LIMIT capped to N` | 请求的 LIMIT 超过上限 | 减小 limit 值或使用分页 |
+| `transaction is already committed or rolled back` | 重复提交/回滚事务 | 检查事务代码逻辑 |
