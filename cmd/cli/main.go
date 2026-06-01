@@ -57,11 +57,11 @@ type qcEnv struct {
 	driver string
 }
 
-// loadQCEnv reads .qcenv from the current working directory.
-// Format: KEY=VALUE, one per line. Lines starting with # are comments.
-func loadQCEnv() qcEnv {
+// loadDotEnv reads .env from the current working directory.
+// Compatible with standard .env format (KEY=VALUE, # comments).
+func loadDotEnv() qcEnv {
 	var env qcEnv
-	data, err := os.ReadFile(".qcenv")
+	data, err := os.ReadFile(".env")
 	if err != nil {
 		return env
 	}
@@ -100,7 +100,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	qcFile := loadQCEnv()
+	qcFile := loadDotEnv()
 
 	cmd := args[0]
 	dsnStr := args[1]
@@ -111,7 +111,7 @@ func main() {
 		dsnStr = qcFile.dsn
 	}
 	if dsnStr == "" {
-		fmt.Fprintf(os.Stderr, "DSN is required as argument, via QC_DSN env var, or .qcenv file\n")
+		fmt.Fprintf(os.Stderr, "DSN is required as argument, via QC_DSN env var, or .env file\n")
 		os.Exit(1)
 	}
 	sql := ""
@@ -257,11 +257,11 @@ Flags:
   --force               skip dangerous operation confirmation
   --version             print version and exit
 
-Config file (.qcenv):
-  echo 'QC_DSN=user:pass@tcp(host:3306)/db' > .qcenv
-  echo 'QC_DRIVER=mysql'                      >> .qcenv
+Config file (.env in current directory):
+  echo 'QC_DSN=user:pass@tcp(host:3306)/db' > .env
+  echo 'QC_DRIVER=mysql'                      >> .env
 
-Priority: CLI arguments > environment variables > .qcenv file
+Priority: CLI arguments > environment variables > .env file
 `)
 }
 
