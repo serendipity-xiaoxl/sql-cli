@@ -19,6 +19,7 @@ import (
 	"github.com/xiaoxl/sql-cli/pkg/result"
 
 	_ "github.com/xiaoxl/sql-cli/pkg/db/postgres"
+		_ "github.com/xiaoxl/sql-cli/pkg/db/sqlite"
 )
 
 var (
