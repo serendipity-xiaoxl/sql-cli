@@ -7,12 +7,15 @@ import "errors"
 type Policy int
 
 const (
-	// PolicyBlock dangerous operations with an error (default).
+	// PolicyBlock dangerous operations with an error.
 	PolicyBlock Policy = iota
 	// PolicyWarn and allow dangerous operations.
 	PolicyWarn
 	// PolicyAllow dangerous operations without warning.
 	PolicyAllow
+	// PolicyPrompt returns a confirmable error, allowing the caller to
+	// prompt the user and retry with PolicyAllow if confirmed.
+	PolicyPrompt
 )
 
 // String returns the string representation of the policy.
@@ -24,6 +27,8 @@ func (p Policy) String() string {
 		return "warn"
 	case PolicyAllow:
 		return "allow"
+	case PolicyPrompt:
+		return "prompt"
 	default:
 		return "unknown"
 	}
@@ -31,6 +36,11 @@ func (p Policy) String() string {
 
 // ErrDangerousOp is returned when a dangerous operation is blocked.
 var ErrDangerousOp = errors.New("dangerous operation blocked")
+
+// ErrDangerousOpPrompt is returned when a dangerous operation needs
+// user confirmation. Callers should prompt the user and retry with
+// PolicyAllow if confirmed.
+var ErrDangerousOpPrompt = errors.New("dangerous operation requires confirmation")
 
 // DangerousOps lists SQL operations considered dangerous by default.
 var DangerousOps = []string{
@@ -71,7 +81,8 @@ func matchesOp(sql, op string) bool {
 }
 
 // Check evaluates the policy for the given SQL statement.
-// Returns ErrDangerousOp if blocked, nil if allowed or warned.
+// Returns ErrDangerousOp if blocked, ErrDangerousOpPrompt if confirmation is
+// needed, nil if allowed or warned.
 func Check(policy Policy, sql string) error {
 	if policy == PolicyAllow {
 		return nil
@@ -79,8 +90,12 @@ func Check(policy Policy, sql string) error {
 	if !IsDangerousOp(sql) {
 		return nil
 	}
-	if policy == PolicyBlock {
+	switch policy {
+	case PolicyBlock:
 		return ErrDangerousOp
+	case PolicyPrompt:
+		return ErrDangerousOpPrompt
+	default:
+		return nil // PolicyWarn and any other non-blocking policy
 	}
-	return nil
 }

@@ -34,8 +34,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.StreamBatchSize != DefaultStreamBatchSize {
 		t.Errorf("StreamBatchSize = %d, want %d", cfg.StreamBatchSize, DefaultStreamBatchSize)
 	}
-	if cfg.DangerousOpPolicy != guard.PolicyBlock {
-		t.Errorf("DangerousOpPolicy = %v, want %v", cfg.DangerousOpPolicy, guard.PolicyBlock)
+	if cfg.DangerousOpPolicy != guard.PolicyPrompt {
+		t.Errorf("DangerousOpPolicy = %v, want %v", cfg.DangerousOpPolicy, guard.PolicyPrompt)
 	}
 	if !cfg.RejectNoWhere {
 		t.Errorf("RejectNoWhere = %v, want true", cfg.RejectNoWhere)

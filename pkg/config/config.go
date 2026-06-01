@@ -66,7 +66,7 @@ func DefaultConfig() *Config {
 		MaxLimit:              DefaultMaxLimit,
 		QueryTimeout:          DefaultQueryTimeout,
 		StreamBatchSize:       DefaultStreamBatchSize,
-		DangerousOpPolicy:     guard.PolicyBlock,
+		DangerousOpPolicy:     guard.PolicyPrompt,
 		LogSanitizeParams:     false,
 		MaxConcurrentQueries:  0,
 	}

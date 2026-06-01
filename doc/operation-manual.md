@@ -93,7 +93,7 @@ Supported SQL:
 - `UPDATE` (WHERE clause required)
 - `DELETE` (WHERE clause required)
 
-**Note**: `DROP TABLE` and `TRUNCATE TABLE` are blocked by default. `UPDATE`/`DELETE` without WHERE are also rejected.
+**Note**: `DROP TABLE` and `TRUNCATE TABLE` prompt for confirmation by default (use `--force` to skip). `UPDATE`/`DELETE` without WHERE are rejected entirely.
 
 Success output:
 
@@ -162,6 +162,7 @@ Output (one line per row):
 | Flag | Description |
 |------|-------------|
 | `--version` | Print version |
+| `--force` | Skip confirmation prompts for dangerous operations |
 
 ### Environment Variables
 
@@ -188,14 +189,36 @@ The `warning` and `has_more` fields in output indicate data truncation.
 
 ### Dangerous Operation Guard
 
-The following operations are blocked by default:
+The following operations prompt for confirmation by default:
 
 | Operation | Default |
 |-----------|---------|
-| `DROP TABLE` | Blocked |
-| `TRUNCATE TABLE` | Blocked |
+| `DROP TABLE` | Prompt |
+| `TRUNCATE TABLE` | Prompt |
 | `UPDATE` without `WHERE` | Blocked |
 | `DELETE` without `WHERE` | Blocked |
+
+Use `--force` to skip prompts (e.g., `qc --force exec ...`). The policy is configurable programmatically via `WithDangerousOpPolicy`.
+
+### Streaming vs Pagination
+
+Both `query` (with `--limit`/`--offset`) and `stream` are available, each serving different use cases.
+
+| Aspect | Streaming (stream) | Pagination (query --limit/--offset) |
+|--------|-------------------|--------------------------------------|
+| Round trips | 1 query, row-by-row | N queries, one per page |
+| Consistency | Snapshot from single cursor | Can miss rows if data changes between pages |
+| First-row latency | Immediate | Must wait for full first page |
+| Programming model | Simple loop | State management (offset tracking) |
+| Early termination | Yes (call Close) | Must let full pages complete |
+| Random access | No | Yes (jump to page N) |
+| Restartable | No (stateful cursor) | Yes (resume from offset) |
+
+**When to use streaming**: Large exports, bulk processing, real-time analysis, agent-driven row-by-row processing, single-pass workflows where you want minimum memory and latency.
+
+**When to use pagination**: UI display, stateless/parallel operations, random page access, restartable batch jobs.
+
+Both are kept because they complement each other — streaming is more efficient for single-pass work, while pagination is better for interactive or restartable access patterns.
 
 ### Non-Query Isolation
 
@@ -310,7 +333,7 @@ tx.Commit(ctx)
 | `WithMaxIdleConns` | int | 5 | Max idle connections |
 | `WithConnMaxLifetime` | duration | 5m | Connection reuse time |
 | `WithStreamBatchSize` | int | 50 | Stream buffer size |
-| `WithDangerousOpPolicy` | Policy | Block | Block/Warn/Allow |
+| `WithDangerousOpPolicy` | Policy | Prompt | Block/Prompt/Warn/Allow |
 | `WithRejectNoWhere` | bool | true | Reject UPDATE/DELETE without WHERE |
 | `WithLogSanitizeParams` | bool | false | Sanitize logged params |
 | `WithMaxConcurrentQueries` | int | 0 | Concurrency cap (0=unlimited) |
@@ -353,7 +376,7 @@ docker stop qc-mysql && docker rm qc-mysql
 
 | Error | Cause | Solution |
 |-------|-------|----------|
-| `dangerous operation blocked` | Tried DROP/TRUNCATE | Adjust policy if intentional |
+| `dangerous operation requires confirmation` | Tried DROP/TRUNCATE without confirmation | Use `--force` to skip prompts or adjust policy |
 | `UPDATE/DELETE without WHERE clause` | Missing WHERE | Add WHERE clause |
 | `only SELECT queries are allowed` | Used query/stream for write | Use exec instead |
 | `LIMIT capped to N` | Limit exceeds max | Reduce limit or use pagination |

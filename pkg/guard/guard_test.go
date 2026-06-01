@@ -11,6 +11,7 @@ func TestPolicyString(t *testing.T) {
 		{PolicyWarn, "warn"},
 		{PolicyAllow, "allow"},
 		{Policy(99), "unknown"},
+		{PolicyPrompt, "prompt"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.want, func(t *testing.T) {
@@ -82,12 +83,66 @@ func TestCheckPolicyBlock(t *testing.T) {
 	}
 }
 
-func TestCheckPolicyWarn(t *testing.T) {
+func TestCheckPolicyPrompt(t *testing.T) {
+	tests := []struct {
+		sql string
+		err bool
+	}{
+		{"DROP TABLE users", true},
+		{"TRUNCATE TABLE users", true},
+		{"SELECT * FROM users", false},
+		{"INSERT INTO users VALUES (1)", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.sql, func(t *testing.T) {
+			err := Check(PolicyPrompt, tt.sql)
+			if tt.err && err == nil {
+				t.Errorf("Check(Prompt, %q) expected error, got nil", tt.sql)
+			}
+			if !tt.err && err != nil {
+				t.Errorf("Check(Prompt, %q) unexpected error = %v", tt.sql, err)
+			}
+		})
+	}
+}
+
+func TestCheckPolicyPromptReturnsErrDangerousOpPrompt(t *testing.T) {
+	err := Check(PolicyPrompt, "DROP TABLE users")
+	if err != ErrDangerousOpPrompt {
+		t.Errorf("Check(Prompt, DROP) = %v, want %v", err, ErrDangerousOpPrompt)
+	}
+}
+
+func TestErrDangerousOpPromptIsDistinct(t *testing.T) {
+	errPrompt := Check(PolicyPrompt, "DROP TABLE users")
+	errBlock := Check(PolicyBlock, "DROP TABLE users")
+
+	if errPrompt == errBlock {
+		t.Error("ErrDangerousOpPrompt and ErrDangerousOp should be distinct")
+	}
+}
+
+func TestCheckPolicyWarnNotBlocked(t *testing.T) {
 	if err := Check(PolicyWarn, "DROP TABLE users"); err != nil {
 		t.Errorf("Check(Warn, DROP) error = %v, want nil", err)
 	}
-	if err := Check(PolicyWarn, "SELECT * FROM users"); err != nil {
-		t.Errorf("Check(Warn, SELECT) error = %v, want nil", err)
+}
+
+func TestCheckPolicyPromptDoesNotBlockNonDangerous(t *testing.T) {
+	tests := []string{
+		"SELECT * FROM users",
+		"INSERT INTO users VALUES (1)",
+		"UPDATE users SET name = 'test' WHERE id = 1",
+		"DELETE FROM users WHERE id = 1",
+		"CREATE TABLE users (id INT)",
+		"ALTER TABLE users ADD COLUMN email TEXT",
+	}
+	for _, sql := range tests {
+		t.Run(sql, func(t *testing.T) {
+			if err := Check(PolicyPrompt, sql); err != nil {
+				t.Errorf("Check(Prompt, %q) unexpected error = %v", sql, err)
+			}
+		})
 	}
 }
 

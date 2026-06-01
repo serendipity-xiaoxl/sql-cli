@@ -256,6 +256,17 @@ func TestExecDropWithPolicyWarn(t *testing.T) {
 	}
 }
 
+func TestExecDropWithDefaultPromptPolicy(t *testing.T) {
+	s, mock := newMockSession(t, config.DefaultConfig())
+
+	runWithClose(t, mock, s, func() {
+		_, err := s.Exec(context.Background(), "DROP TABLE users")
+		if err == nil {
+			t.Fatal("Exec() expected error for DROP with default PolicyPrompt, got nil")
+		}
+	})
+}
+
 func TestExecContextDeadlineExceeded(t *testing.T) {
 	s, mock := newMockSession(t, config.DefaultConfig())
 
