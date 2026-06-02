@@ -62,7 +62,41 @@ echo "BEGIN; INSERT INTO t VALUES(1); COMMIT;" | qc shell <dsn>
 
 ## Install
 
-Download from [Releases](https://github.com/serendipity-xiaoxl/sql-cli/releases) or build from source:
+### Download Binary (recommended)
+
+Download the latest release from [Releases](https://github.com/serendipity-xiaoxl/sql-cli/releases), rename, and run:
+
+**macOS (Apple Silicon):**
+```bash
+curl -LO https://github.com/serendipity-xiaoxl/sql-cli/releases/download/v0.3.0/qc-darwin-arm64
+mv qc-darwin-arm64 qc && chmod +x qc
+./qc --version
+```
+
+**macOS (Intel):**
+```bash
+curl -LO https://github.com/serendipity-xiaoxl/sql-cli/releases/download/v0.3.0/qc-darwin-amd64
+mv qc-darwin-amd64 qc && chmod +x qc
+```
+
+**Linux (x86_64):**
+```bash
+curl -LO https://github.com/serendipity-xiaoxl/sql-cli/releases/download/v0.3.0/qc-linux-amd64
+mv qc-linux-amd64 qc && chmod +x qc
+```
+
+**Linux (ARM64):**
+```bash
+curl -LO https://github.com/serendipity-xiaoxl/sql-cli/releases/download/v0.3.0/qc-linux-arm64
+mv qc-linux-arm64 qc && chmod +x qc
+```
+
+**Windows (x86_64):**
+Download [qc-windows-amd64.exe](https://github.com/serendipity-xiaoxl/sql-cli/releases/download/v0.3.0/qc-windows-amd64.exe), rename to `qc.exe`.
+
+Binaries are statically linked, no dependencies required. SHA256 checksums in `checksums.txt`.
+
+### Build from Source
 
 ```bash
 git clone https://github.com/serendipity-xiaoxl/sql-cli.git
