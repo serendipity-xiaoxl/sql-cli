@@ -2,7 +2,7 @@
 
 `qc` is a multi-database CLI for MySQL, PostgreSQL, and SQLite. All output is JSON. Built-in safety guards. Designed for AI Agents and developers.
 
-Version: 0.2.0
+Version: 0.3.0
 
 ---
 
@@ -53,7 +53,7 @@ qc query "/data/mydb.sqlite" "SELECT * FROM users"
 
 ## Commands
 
-DSN priority: CLI argument > `QC_DSN` env var > `.env` file
+DSN priority: CLI argument > `QC_DSN` env var > `.env` file. Global flags (`--driver`, `--force`, `--limit`, `--timeout`) must appear before the command name.
 
 ### ping
 
@@ -68,7 +68,7 @@ Success: `{"status":"ok"}`
 ```
 qc exec [dsn] <sql>
 qc exec [dsn] -f <file.sql>              # batch from file
-qc --force exec [dsn] <sql>              # skip confirmation
+qc exec [dsn] --force <sql>              # skip confirmation
 ```
 
 | Flag | Description |
@@ -134,12 +134,50 @@ Outputs one JSON object per line:
 {"id": 2, "name": "Bob"}
 ```
 
+### shell
+
+```
+qc shell [dsn] [--limit N] [--timeout D] [--force]
+```
+
+Interactive read-eval-print loop with a persistent connection. Each SQL statement returns one JSON line. Statements separated by `;` execute sequentially on the same connection.
+
+```bash
+# Interactive mode
+qc shell <dsn>
+
+# Pipeline mode (AI Agent)
+echo "SELECT * FROM users; INSERT INTO logs VALUES(1);" | qc shell <dsn>
+
+# Multi-statement transaction
+echo "BEGIN; INSERT INTO t VALUES(1); COMMIT;" | qc shell <dsn>
+```
+
+| Command | Description |
+|---------|-------------|
+| `exit` / `quit` | Exit the shell |
+| Ctrl+D | Exit the shell |
+| `--` prefix | Line comment (skipped) |
+
+Output — one JSON line per statement:
+
+```json
+{"statement":"SELECT * FROM users","type":"query","result":{"columns":["id"],"rows":[[1]],"row_count":1,"duration_ms":0}}
+{"statement":"INSERT INTO logs VALUES(1)","type":"exec","result":{"last_insert_id":1,"rows_affected":1,"duration_ms":2}}
+{"statement":"BAD SQL","type":"exec","error":"syntax error..."}
+```
+
+In interactive mode, a `qc> ` prompt appears on stderr. In pipeline mode, stdout contains only JSON. All log output is suppressed (WARN+ only).
+
 ### Global Flags
 
 | Flag | Description |
 |------|-------------|
 | `--driver <name>` | mysql / postgres / sqlite |
-| `--force` | Skip confirmation (must be before command) |
+| `--force` | Skip confirmation |
+| `--limit N` | Query row limit (shell/query) |
+| `--offset N` | Query row offset (query) |
+| `--timeout D` | Query timeout |
 | `--version` | Print version |
 
 ---
@@ -160,6 +198,22 @@ qc --driver postgres ping "postgres://..."
 
 ---
 
+## Connection Lifecycle
+
+Each CLI invocation opens a single connection (MaxOpenConns=1), executes its work, and closes it on exit. The Go library default (MaxOpenConns=25) still applies when embedding `qc` as a library in long-running applications.
+
+### When to use shell vs one-shot commands
+
+| Scenario | Use |
+|----------|-----|
+| Single SELECT/INSERT/UPDATE | One-shot `query` or `exec` |
+| Multi-statement transaction | `shell` or `exec --file --transaction` |
+| Stateful session (SET, TEMP TABLE) | `shell` |
+| AI Agent with multiple SQL calls | `shell` (pipeline mode) |
+| Batch from file | `exec --file` |
+
+---
+
 ## Safety
 
 - **LIMIT enforcement**: auto 100, max 1000
@@ -167,6 +221,7 @@ qc --driver postgres ping "postgres://..."
 - **WHERE guard**: UPDATE/DELETE without WHERE are blocked
 - **Command isolation**: query/stream only accept SELECT
 - **Timeout**: default 30s, auto-cancel
+- **Shell**: auto-allows dangerous operations (interactive context)
 
 ---
 

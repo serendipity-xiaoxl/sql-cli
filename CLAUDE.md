@@ -32,8 +32,13 @@ Single `Session` struct shared by all backends. Wraps a `*sqlx.DB`. Key methods:
 
 - `Exec(ctx, sql, args...)` — DDL/DML with guard checks
 - `Query/QueryWithLimit/QueryWithOffset` — SELECT with LIMIT enforcement
+- `QueryRead(ctx, sql, args...)` — read queries without SELECT-only restriction (shell use)
 - `QueryStream` — goroutine-based channel streaming
 - `Begin` — returns `Tx` with auto-rollback timeout
+
+### CLI Connection Lifecycle
+
+CLI uses MaxOpenConns=1 (single connection per invocation). The Go library defaults (MaxOpenConns=25) still apply for embedded use. Log level is WARN for CLI, INFO for library users.
 
 ### Placeholder Rebind
 
@@ -58,6 +63,10 @@ MySQL/SQLite use `?`; PostgreSQL uses `$N`. Before every DB call, `s.Rebind(sql)
 
 `batchExec()` executes multiple statements with optional transaction wrapping and continue-on-error support.
 
+### Shell Mode (`cmd/cli/shell.go`)
+
+`runShell()` provides an interactive REPL with persistent connection. Auto-detects read vs write operations. Supports `;`-separated multi-statements, stdin pipeline mode, and cross-statement transactions.
+
 ### DSN Detection (`pkg/dsn/`)
 
 Auto-detects driver from DSN format: `postgres://` → postgres, `/path/file.db` → sqlite, `user@tcp(...)` → mysql.
@@ -73,13 +82,13 @@ Auto-detects driver from DSN format: `postgres://` → postgres, `/path/file.db`
 ## Package Layout
 
 ```
-cmd/cli/            CLI entry point (main.go, batch.go)
+cmd/cli/            CLI entry point (main.go, shell.go, batch.go)
 internal/
   sanitize/         SQL param sanitization
   sqlnorm/          SQL parsing, clause detection, batch splitting
 pkg/
   config/           Config struct + functional options
-  db/               Core: Database interface, Session, Exec, Query, Stream, Tx
+  db/               Core: Database interface, Session, Exec, Query, QueryRead, Stream, Tx
     mysql/          MySQL driver (self-registers)
     postgres/       PostgreSQL driver (self-registers)
     sqlite/         SQLite driver (self-registers)

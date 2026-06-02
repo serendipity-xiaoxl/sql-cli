@@ -2,7 +2,7 @@
 
 `qc` 是一个多数据库命令行工具，支持 MySQL、PostgreSQL、SQLite。所有输出为 JSON，内置安全守卫机制，专为 AI Agent 及开发者设计。
 
-版本：0.2.0
+版本：0.3.0
 
 ---
 
@@ -53,7 +53,7 @@ qc query "/data/mydb.sqlite" "SELECT * FROM users"
 
 ## 命令参考
 
-DSN 优先级：命令行参数 > `QC_DSN` 环境变量 > `.env` 文件
+DSN 优先级：命令行参数 > `QC_DSN` 环境变量 > `.env` 文件。全局选项（`--driver`、`--force`、`--limit`、`--timeout`）需放在命令名称之前。
 
 ### ping — 连通性检查
 
@@ -68,7 +68,7 @@ qc ping [dsn]
 ```
 qc exec [dsn] <sql>
 qc exec [dsn] -f <file.sql>             # 从文件批量执行
-qc --force exec [dsn] <sql>             # 跳过危险操作确认
+qc exec [dsn] --force <sql>             # 跳过危险操作确认
 ```
 
 | 选项 | 说明 |
@@ -76,8 +76,6 @@ qc --force exec [dsn] <sql>             # 跳过危险操作确认
 | `-f, --file <path>` | 读取 SQL 文件批量执行 |
 | `--transaction` | 所有语句包装为单个事务 |
 | `--continue-on-error` | 遇错继续执行后续语句 |
-
-支持的 SQL：CREATE TABLE、ALTER TABLE、INSERT、UPDATE、DELETE。
 
 DROP 和 TRUNCATE 需要交互确认（输入 `yes`），或使用 `--force` 跳过。UPDATE/DELETE 无 WHERE 直接拒绝。
 
@@ -136,12 +134,50 @@ qc stream [dsn] <sql> [--limit N] [--timeout D]
 {"id": 2, "name": "Bob"}
 ```
 
+### shell — 交互式 Shell
+
+```
+qc shell [dsn] [--limit N] [--timeout D] [--force]
+```
+
+维护一个持久连接的交互式 Shell。每条 SQL 返回一行 JSON，`;` 分隔的语句在同一连接上顺序执行。
+
+```bash
+# 交互模式
+qc shell <dsn>
+
+# 管道模式（AI Agent）
+echo "SELECT * FROM users; INSERT INTO logs VALUES(1);" | qc shell <dsn>
+
+# 跨语句事务
+echo "BEGIN; INSERT INTO t VALUES(1); COMMIT;" | qc shell <dsn>
+```
+
+| 命令 | 说明 |
+|------|------|
+| `exit` / `quit` | 退出 Shell |
+| Ctrl+D | 退出 Shell |
+| `--` 前缀 | 行注释（跳过） |
+
+输出 — 每条语句一行 JSON：
+
+```json
+{"statement":"SELECT * FROM users","type":"query","result":{"columns":["id"],"rows":[[1]],"row_count":1,"duration_ms":0}}
+{"statement":"INSERT INTO logs VALUES(1)","type":"exec","result":{"last_insert_id":1,"rows_affected":1,"duration_ms":2}}
+{"statement":"BAD SQL","type":"exec","error":"语法错误..."}
+```
+
+交互模式下 stderr 显示 `qc> ` 提示符。管道模式下 stdout 只输出 JSON，日志仅输出 WARN 及以上级别。
+
 ### 全局选项
 
 | 选项 | 说明 |
 |------|------|
 | `--driver <name>` | 指定数据库驱动（mysql/postgres/sqlite） |
-| `--force` | 跳过危险操作确认（需放在命令前） |
+| `--force` | 跳过危险操作确认 |
+| `--limit N` | 查询返回行数上限（shell/query） |
+| `--offset N` | 查询跳过行数（query） |
+| `--timeout D` | 查询超时 |
 | `--version` | 打印版本号 |
 
 ---
@@ -162,6 +198,22 @@ qc --driver postgres ping "postgres://..."
 
 ---
 
+## 连接生命周期
+
+每次 CLI 调用只建立 1 个连接（MaxOpenConns=1），执行完毕后退出时关闭。Go Library 用户仍使用默认值（MaxOpenConns=25），适合长生命周期应用。
+
+### Shell 与单次命令的选择
+
+| 场景 | 推荐方式 |
+|------|----------|
+| 单条 SELECT/INSERT/UPDATE | `query` 或 `exec` |
+| 多语句事务 | `shell` 或 `exec --file --transaction` |
+| 需要保持会话状态（SET、临时表） | `shell` |
+| AI Agent 连续多条 SQL | `shell`（管道模式） |
+| 从文件批量执行 | `exec --file` |
+
+---
+
 ## 安全机制
 
 - **LIMIT 强制**：无 LIMIT 时自动追加 100，上限 1000
@@ -169,6 +221,7 @@ qc --driver postgres ping "postgres://..."
 - **无条件修改拦截**：UPDATE/DELETE 无 WHERE 直接拒绝
 - **命令隔离**：query/stream 只接受 SELECT，写操作被拒绝
 - **超时保护**：默认 30s 超时自动取消
+- **Shell 模式**：交互场景下自动允许危险操作
 
 ---
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
@@ -84,6 +85,8 @@ func loadDotEnv() qcEnv {
 }
 
 func main() {
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
+
 	flag.Parse()
 
 	if version {
@@ -157,7 +160,10 @@ func main() {
 		}
 	}
 
-	opts := []config.Option{}
+	opts := []config.Option{
+		config.WithMaxOpenConns(1),
+		config.WithMaxIdleConns(1),
+	}
 	if timeout > 0 {
 		opts = append(opts, config.WithQueryTimeout(timeout))
 	}
@@ -177,6 +183,11 @@ func main() {
 			fatal("ping: %v", err)
 		}
 		json.NewEncoder(os.Stdout).Encode(map[string]string{"status": "ok"})
+
+	case "shell":
+		if err := runShell(sess, limit, offset, force || forceDeprecated); err != nil {
+			fatal("shell: %v", err)
+		}
 
 	case "exec":
 		if filePath != "" {
@@ -272,6 +283,7 @@ Usage:
   qc exec   [dsn] [<sql>]     [--file <path>] [--transaction] [--continue-on-error]
   qc query  [dsn] [<sql>]     [--limit N] [--offset N] [--timeout D]
   qc stream [dsn] <sql>       [--limit N] [--timeout D]
+  qc shell  [dsn]             [--limit N] [--timeout D] [--force]
 
 Flags:
   --driver <name>       database driver (mysql/postgres/sqlite, auto-detected)

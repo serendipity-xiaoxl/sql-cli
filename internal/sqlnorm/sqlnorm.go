@@ -21,6 +21,16 @@ func IsSELECT(op string) bool {
 	return op == "SELECT" || op == "WITH"
 }
 
+// IsReadOperation checks if the operation returns a result set (SELECT, SHOW, DESCRIBE, etc.).
+func IsReadOperation(op string) bool {
+	switch op {
+	case "SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN":
+		return true
+	default:
+		return false
+	}
+}
+
 // HasWHERE checks if a SQL statement contains a WHERE clause.
 // It strips string literals before checking to avoid false positives.
 func HasWHERE(sql string) bool {
