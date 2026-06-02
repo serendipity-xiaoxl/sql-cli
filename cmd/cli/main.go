@@ -50,7 +50,7 @@ func init() {
 	flag.StringVar(&driverFlag, "driver", "", "database driver (auto-detected from DSN if not set)")
 }
 
-const appVersion = "0.2.0"
+var appVersion = "0.3.0"
 
 type qcEnv struct {
 	dsn    string

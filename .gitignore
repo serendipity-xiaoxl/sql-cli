@@ -6,3 +6,4 @@ vendor/
 /sql-cli
 /qc
 .env
+dist/
